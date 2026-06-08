@@ -257,6 +257,9 @@ let shotsLeft = MAX_SHOTS;
 for(let i=0;i<80;i++) stars.push({x:Math.random()*W,y:Math.random()*(H*0.35),b:Math.random()});
 for(let i=0;i<60;i++) crowdBaseNoise.push({x:Math.random()*W,y:H*0.18+Math.random()*H*0.14,c:randCrowdColor(),phase:Math.random()*Math.PI*2});
 
+// GK starts idle immediately — visible from the very first frame
+gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
+
 function randCrowdColor(){
   const cols=['#ff3333','#3366ff','#ffff00','#ffffff','#33cc33','#ff9900','#cc33ff','#00ffff'];
   return cols[Math.floor(Math.random()*cols.length)];
@@ -316,11 +319,13 @@ function initGame(){
   chargeLevel=0;
   isCharging=false;
   crowdCheerLevel=0;
+  gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
 }
 
 function nextShot(){
-  // Reset all animation state for a fresh shot
-  ballAnim=null; kickAnim=null; gkAnim=null;
+  // Reset animation state but keep GK visible in idle
+  ballAnim=null; kickAnim=null;
+  gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
   chargeLevel=0;
   isCharging=false;
   showOutcome('', '', '');
@@ -356,66 +361,99 @@ function shoot(){
   totalShots++;
   shotsLeft--;
 
-  const zone     = getZone(chargeLevel);
-  const roll     = Math.random();
-  const isGoal   = roll < zone.goalChance;
-
-  // Aim normalised (-1..1)
-  const nx = (aimX/W)*2-1;
-  const ny = (aimY/H)*2-1;
-  const power = 0.5 + chargeLevel*0.5;
-
-  let outcome, targetX, targetY;
+  const zone  = getZone(chargeLevel);
+  const power = 0.5 + chargeLevel * 0.5;
   curveDir = 0;
 
-  if(zone.label === 'BAD'){
-    // BAD zone — always miss: wild, embarrassing
-    outcome  = 'miss';
-    const wideRoll = Math.random();
-    if(wideRoll < 0.5){
-      targetX = (Math.random()<0.5) ? W*0.05 : W*0.95;
-      targetY = H*0.42 + Math.random()*H*0.1;
+  // ── Goal frame in screen-space ──────────────────────────
+  // Posts: lp=W*0.305, rp=W*0.695+8  top=H*0.27  bot=H*0.50
+  const GOAL_LX  = W * 0.305;          // inner left post edge
+  const GOAL_RX  = W * 0.695 + 8;      // inner right post edge
+  const GOAL_TOP = H * 0.27;
+  const GOAL_BOT = H * 0.50;
+
+  // ── Is the crosshair inside the goal frame? ─────────────
+  const aimedInGoal = (
+    aimX >= GOAL_LX && aimX <= GOAL_RX &&
+    aimY >= GOAL_TOP && aimY <= GOAL_BOT
+  );
+
+  let outcome, targetX, targetY;
+
+  if(!aimedInGoal){
+    // ── AIMED OUTSIDE THE POST — always miss ──────────────
+    outcome = 'miss';
+    // Ball travels toward where the player actually aimed
+    targetX = aimX;
+    targetY = aimY;
+  } else if(zone.label === 'BAD'){
+    // ── BAD power zone — always miss even inside frame ────
+    outcome = 'miss';
+    // Skew the ball just outside the frame for visual drama
+    const missDir = (aimX < W/2) ? -1 : 1;
+    const missRoll = Math.random();
+    if(missRoll < 0.5){
+      targetX = (missDir < 0) ? W * 0.25 : W * 0.75;
+      targetY = aimY + (Math.random() - 0.5) * 40;
     } else {
-      targetX = W/2 + nx*(W*0.2);
-      targetY = H*0.05;
+      targetX = aimX + missDir * 30;
+      targetY = H * 0.06;             // skied over bar
     }
-  } else if(isGoal){
-    // Determine if curve (rare 18% sub-roll inside goal outcomes)
-    const isCurve = Math.random() < 0.18;
-    outcome  = isCurve ? 'curve' : 'goal';
-    curveDir = isCurve ? (Math.random()<0.5?1:-1) : 0;
-    targetX  = W/2 + nx*(W*0.28);
-    targetY  = H*0.32 + ny*(H*0.08);
   } else {
-    // Not a goal — distribute among save / post / miss
-    const failRoll = Math.random();
-    if(failRoll < 0.50){
-      outcome  = 'save';
-      targetX  = W/2 + nx*(W*0.22);
-      targetY  = H*0.33;
-    } else if(failRoll < 0.75){
-      outcome  = 'post';
-      targetX  = (Math.random()<0.5) ? W*0.305 : W*0.695;
-      targetY  = H*0.30 + Math.random()*0.08*H;
+    // ── Aimed inside goal — use zone goal-chance roll ─────
+    const roll   = Math.random();
+    const isGoal = roll < zone.goalChance;
+
+    if(isGoal){
+      const isCurve = Math.random() < 0.18;
+      outcome  = isCurve ? 'curve' : 'goal';
+      curveDir = isCurve ? (Math.random() < 0.5 ? 1 : -1) : 0;
+      // Ball lands exactly where player aimed (inside goal)
+      targetX  = aimX;
+      targetY  = aimY;
     } else {
-      outcome  = 'miss';
-      if(Math.random()<0.5){ targetX=(Math.random()<0.5)?W*0.1:W*0.9; targetY=H*0.38; }
-      else                  { targetX=W/2+nx*(W*0.3); targetY=H*0.04; }
+      // Fail inside frame — save, post, or scrambled miss
+      const failRoll = Math.random();
+      if(failRoll < 0.55){
+        outcome = 'save';
+        // GK positioned toward aimed side
+        targetX = aimX;
+        targetY = aimY;
+      } else if(failRoll < 0.80){
+        outcome = 'post';
+        // Snap to nearest post
+        const distL = Math.abs(aimX - GOAL_LX);
+        const distR = Math.abs(aimX - GOAL_RX);
+        targetX = (distL < distR) ? GOAL_LX : GOAL_RX;
+        targetY = aimY;
+      } else {
+        // Narrowly wide or just over
+        outcome = 'miss';
+        const missDir2 = (aimX < W/2) ? -1 : 1;
+        targetX = aimX + missDir2 * (20 + Math.random() * 30);
+        targetY = aimY - 10;
+      }
     }
   }
 
-  // GK animation — dive for save, full jump for goal, idle otherwise
-  if(outcome==='save'){
+  // ── GK reaction — always visible, phase depends on outcome ─
+  if(outcome === 'save'){
     const diveDir = (targetX < W/2) ? -1 : 1;
-    gkAnim = { t:0, phase:'ready', dir:diveDir, frameCount:0 };
-  } else if(outcome==='goal'||outcome==='curve'){
-    // GK dives wrong way
-    const wrongDir = (Math.random()<0.5) ? 1 : -1;
-    gkAnim = { t:0, phase:'ready', dir:wrongDir, frameCount:0 };
-  } else if(outcome==='post'){
-    gkAnim = { t:0, phase:'ready', dir:0, frameCount:0 };
+    // Randomise catch vs deflect for variety
+    const saveType = Math.random() < 0.55 ? 'catch' : 'deflect';
+    gkAnim = { phase:'ready', dir:diveDir, frameCount:0, outcome:saveType, targetX, targetY };
+  } else if(outcome === 'goal' || outcome === 'curve'){
+    // Dives the wrong way — full commit wrong side
+    const wrongDir = (targetX < W/2) ? 1 : -1;
+    gkAnim = { phase:'ready', dir:wrongDir, frameCount:0, outcome:'wrongdive', targetX, targetY };
+  } else if(outcome === 'post'){
+    // Slight reach toward post then recoil
+    const postDir = (targetX < W/2) ? -1 : 1;
+    gkAnim = { phase:'ready', dir:postDir, frameCount:0, outcome:'post', targetX, targetY };
   } else {
-    gkAnim = { t:0, phase:'idle', dir:0, frameCount:0 };
+    // Miss — GK watches ball go wide, slight lean — start idle, update loop triggers watch
+    const watchDir = (targetX < W/2) ? -1 : 1;
+    gkAnim = { phase:'idle', dir:watchDir, frameCount:0, outcome:'watch', targetX, targetY };
   }
 
   currentOutcome = outcome;
@@ -423,8 +461,8 @@ function shoot(){
   kickAnim = { t:0, phase:'windup' };
   ballAnim = {
     sx:W/2, sy:H*0.68, tx:targetX, ty:targetY,
-    t:0, dur:outcome==='miss'?55:48, power, outcome,
-    curveDir, spin:0
+    t:0, dur: outcome === 'miss' ? 55 : 48,
+    power, outcome, curveDir, spin:0
   };
   resultTimer = 0;
 }
@@ -751,236 +789,335 @@ function drawGoal(){
 }
 
 function drawGoalkeeper(){
-  if(!gkAnim) return;
+  // GK is ALWAYS visible — default to idle if somehow null
+  if(!gkAnim) gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
 
-  const fc   = gkAnim.frameCount;
-  const dir  = gkAnim.dir;   // -1 left, 0 centre, 1 right
-  const phase= gkAnim.phase;
+  const fc    = gkAnim.frameCount;
+  const dir   = gkAnim.dir;
+  const phase = gkAnim.phase;
+  const gkOut = gkAnim.outcome || '';
 
   const baseX = W / 2;
   const baseY = H * 0.435;
 
   let dx = 0, dy = 0, rot = 0;
-  let legSpread = 0, armRaiseL = 0, armRaiseR = 0;
+  let legSpread = 7, armRaiseL = 0.36, armRaiseR = 0.36;
   let crouchY = 0;
+  let catchPose   = false;
+  let deflectPose = false;
 
-  // ── idle bounce while ball not yet kicked ──────────────────
+  // ── IDLE — side-to-side sway, always shown ─────────────────
   if(phase === 'idle'){
-    dx = Math.sin(frame * 0.07) * 9;
-    dy = Math.abs(Math.sin(frame * 0.12)) * (-3);
-    armRaiseL = 0.35 + Math.sin(frame * 0.07) * 0.15;
-    armRaiseR = 0.35 - Math.sin(frame * 0.07) * 0.15;
-    legSpread = 4 + Math.sin(frame * 0.12) * 2;
+    const sw = Math.sin(frame * 0.055);
+    dx = sw * 11;
+    dy = -Math.abs(Math.sin(frame * 0.11)) * 4;
+    armRaiseL = 0.40 + sw * 0.18;
+    armRaiseR = 0.40 - sw * 0.18;
+    legSpread = 9 + Math.abs(sw) * 3;
+    crouchY   = Math.abs(Math.sin(frame * 0.09)) * 2;
   }
 
-  // ── ready: anticipation crouch ────────────────────────────
+  // ── WATCH — ball going wide, GK leans and tracks ───────────
+  if(phase === 'watch'){
+    const t = Math.min(fc / 40, 1);
+    dx = dir * t * 14;
+    armRaiseL = dir < 0 ? 0.5 + t * 0.3 : 0.3;
+    armRaiseR = dir > 0 ? 0.5 + t * 0.3 : 0.3;
+    legSpread = 7 + t * 4;
+    if(fc >= 55){ gkAnim.phase = 'idle'; gkAnim.frameCount = 0; }
+  }
+
+  // ── READY — anticipation crouch ────────────────────────────
   if(phase === 'ready'){
-    const t = Math.min(fc / 12, 1);
-    crouchY  = t * 7;                          // dip down
-    legSpread= 6 + t * 4;
-    dx = Math.sin(frame * 0.07) * (1-t) * 9;  // sway fades out
-    armRaiseL = 0.4 + t * 0.3;
-    armRaiseR = 0.4 + t * 0.3;
-    if(fc >= 12) gkAnim.phase = 'pushoff';
-  }
-
-  // ── pushoff: explosive leap ───────────────────────────────
-  if(phase === 'pushoff'){
-    const t = Math.min(fc / 8, 1);
-    const ease = t * t;
-    dx = dir * ease * 18;
-    dy = -ease * 14;
-    crouchY = (1 - t) * 7;
-    rot = dir * ease * 0.25;
-    armRaiseL = dir < 0 ? 0.9 + ease * 0.8 : 0.3;
-    armRaiseR = dir > 0 ? 0.9 + ease * 0.8 : 0.3;
-    legSpread = 10 + t * 6;
-    if(fc >= 8) gkAnim.phase = 'dive';
-  }
-
-  // ── dive: full flying extension ───────────────────────────
-  if(phase === 'dive'){
-    const t = Math.min(fc / 22, 1);
-    const easeOut = 1 - Math.pow(1 - t, 3);
-    dx  = dir * (18 + easeOut * 75);
-    dy  = -14 + easeOut * 28;           // arc: up then falls
-    rot = dir * (0.25 + easeOut * 0.95);
-    armRaiseL = dir < 0 ? 1.7 : 0.2;
-    armRaiseR = dir > 0 ? 1.7 : 0.2;
-    legSpread = 16 + easeOut * 12;
-    if(fc >= 22) gkAnim.phase = 'land';
-  }
-
-  // ── land: thud on ground ──────────────────────────────────
-  if(phase === 'land'){
     const t = Math.min(fc / 10, 1);
-    dx  = dir * 93 + dir * t * 5;
-    dy  = 14 + t * 8;                  // settle down
-    rot = dir * (1.2 - t * 0.3);
-    armRaiseL = dir < 0 ? 1.5 - t * 0.6 : 0.2;
-    armRaiseR = dir > 0 ? 1.5 - t * 0.6 : 0.2;
-    legSpread = 28 - t * 8;
-    if(fc >= 10) gkAnim.phase = 'recover';
+    crouchY   = t * 10;
+    legSpread = 9 + t * 7;
+    dx = Math.sin(frame * 0.07) * (1 - t) * 10;
+    armRaiseL = 0.45 + t * 0.35;
+    armRaiseR = 0.45 + t * 0.35;
+    if(fc >= 10){
+      gkAnim.phase = 'pushoff';
+      gkAnim.frameCount = 0;
+    }
   }
 
-  // ── recover: get back up ─────────────────────────────────
+  // ── PUSHOFF — explosive first step ─────────────────────────
+  if(phase === 'pushoff'){
+    const t = Math.min(fc / 7, 1);
+    const e = t * t;
+    dx = dir * e * 22;
+    dy = -e * 17;
+    crouchY = (1 - t) * 10;
+    rot = dir * e * 0.30;
+    armRaiseL = dir < 0 ? 0.9 + e * 0.95 : 0.35;
+    armRaiseR = dir > 0 ? 0.9 + e * 0.95 : 0.35;
+    legSpread = 13 + t * 9;
+    if(fc >= 7){
+      if(gkOut === 'catch')   { gkAnim.phase = 'dive_catch';   gkAnim.frameCount = 0; }
+      else if(gkOut === 'deflect') { gkAnim.phase = 'dive_deflect'; gkAnim.frameCount = 0; }
+      else                    { gkAnim.phase = 'dive';          gkAnim.frameCount = 0; }
+    }
+  }
+
+  // ── DIVE — standard dive (wrong way / post) ────────────────
+  if(phase === 'dive'){
+    const t  = Math.min(fc / 22, 1);
+    const eo = 1 - Math.pow(1 - t, 3);
+    dx  = dir * (22 + eo * 80);
+    dy  = -17 + eo * 34;
+    rot = dir * (0.30 + eo * 1.0);
+    armRaiseL = dir < 0 ? 1.75 : 0.22;
+    armRaiseR = dir > 0 ? 1.75 : 0.22;
+    legSpread = 18 + eo * 15;
+    if(fc >= 22){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
+  }
+
+  // ── DIVE_CATCH — reach and cup both hands around ball ──────
+  if(phase === 'dive_catch'){
+    const t  = Math.min(fc / 20, 1);
+    const eo = 1 - Math.pow(1 - t, 2);
+    dx  = dir * (22 + eo * 62);
+    dy  = -17 + eo * 18;
+    rot = dir * (0.30 + eo * 0.70);
+    if(dir < 0){
+      armRaiseL = 0.85 + eo * 1.05;   // lead arm extends to ball
+      armRaiseR = 0.55 + eo * 0.80;   // trail arm wraps behind
+    } else {
+      armRaiseR = 0.85 + eo * 1.05;
+      armRaiseL = 0.55 + eo * 0.80;
+    }
+    legSpread = 17 + eo * 11;
+    catchPose = t > 0.55;
+    if(fc >= 20){ gkAnim.phase = 'hold'; gkAnim.frameCount = 0; }
+  }
+
+  // ── HOLD — clutching ball to chest after catch ─────────────
+  if(phase === 'hold'){
+    const t = Math.min(fc / 16, 1);
+    dx  = dir * (84 - t * 8);
+    dy  = 3 + t * 8;
+    rot = dir * (1.0 - t * 0.40);
+    armRaiseL = 1.55 - t * 0.45;
+    armRaiseR = 1.55 - t * 0.45;
+    legSpread = 28 - t * 8;
+    catchPose = true;
+    if(fc >= 16){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
+  }
+
+  // ── DIVE_DEFLECT — full stretch, one arm vertical, fingertip ─
+  if(phase === 'dive_deflect'){
+    const t  = Math.min(fc / 22, 1);
+    const eo = 1 - Math.pow(1 - t, 2);
+    dx  = dir * (22 + eo * 72);
+    dy  = -22 + eo * 14;           // stays high — fingertip over bar
+    rot = dir * (0.26 + eo * 0.80);
+    if(dir < 0){
+      armRaiseL = 0.95 + eo * 1.65;  // nearly straight up
+      armRaiseR = 0.30 + eo * 0.40;
+    } else {
+      armRaiseR = 0.95 + eo * 1.65;
+      armRaiseL = 0.30 + eo * 0.40;
+    }
+    legSpread = 19 + eo * 17;
+    deflectPose = t > 0.5;
+    if(fc >= 22){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
+  }
+
+  // ── LAND — hit the turf ────────────────────────────────────
+  if(phase === 'land'){
+    const t = Math.min(fc / 12, 1);
+    dx  = dir * (96 + dir * t * 7);
+    dy  = 18 + t * 12;
+    rot = dir * (1.28 - t * 0.45);
+    armRaiseL = dir < 0 ? 1.5 - t * 0.6 : 0.25;
+    armRaiseR = dir > 0 ? 1.5 - t * 0.6 : 0.25;
+    legSpread = 32 - t * 12;
+    if(fc >= 12){ gkAnim.phase = 'recover'; gkAnim.frameCount = 0; }
+  }
+
+  // ── RECOVER — get back up, return to idle ──────────────────
   if(phase === 'recover'){
-    const t = Math.min(fc / 30, 1);
-    dx  = dir * (98 - t * 70);
-    dy  = (1 - t) * 22 - 2;
-    rot = dir * (0.9 - t * 0.9);
-    armRaiseL = 0.3 + (1-t) * 0.4;
-    armRaiseR = 0.3 + (1-t) * 0.4;
-    legSpread = 6 + (1-t) * 14;
+    const t  = Math.min(fc / 38, 1);
+    const eo = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
+    dx  = dir * (103 - eo * 103);
+    dy  = (1 - eo) * 30 - 2;
+    rot = dir * (0.83 - eo * 0.83);
+    armRaiseL = 0.36 + (1 - t) * 0.44;
+    armRaiseR = 0.36 + (1 - t) * 0.44;
+    legSpread = 8 + (1 - t) * 18;
+    if(fc >= 38){ gkAnim.phase = 'idle'; gkAnim.frameCount = 0; }
   }
 
   gkAnim.frameCount++;
 
-  // ── draw GK body ─────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════
+  // DRAW GK
+  // ══════════════════════════════════════════════════════════
   ctx.save();
   ctx.translate(px(baseX + dx), py(baseY + dy + crouchY));
   ctx.rotate(rot);
 
-  const gc  = '#ff6600';  // shirt colour
-  const gcd = '#cc4400';  // shadow
-  const sk  = '#f5c99a';  // skin
-  const glov= '#ffe800';  // gloves
+  const gc      = '#ff6600';
+  const gcd     = '#cc4400';
+  const sk      = '#f5c99a';
+  const glov    = '#ffe800';
+  const glovD   = '#cc9900';
+  const ls      = legSpread;
 
-  // ── legs (spread apart based on legSpread) ────────────────
-  const ls = legSpread;
+  // Ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  ctx.beginPath();
+  ctx.ellipse(0, 40, ls + 5, 5, 0, 0, Math.PI*2);
+  ctx.fill();
 
-  // Left leg
+  // ── LEFT LEG ──────────────────────────────────────────────
   ctx.save();
-  ctx.translate(-ls * 0.5, 0);
-  if(rot !== 0) ctx.rotate(-rot * 0.4); // legs stay more upright
-  // Thigh
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-5, -4, 10, 18);
-  // Shin / sock
-  ctx.fillStyle = '#cc0000';
-  ctx.fillRect(-4, 12, 9, 14);
-  // Boot
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-6, 24, 13, 6);
-  ctx.fillRect(-7, 28, 15, 4);
+  ctx.translate(-ls * 0.55, 0);
+  if(rot !== 0) ctx.rotate(-rot * 0.45);
+  ctx.fillStyle = '#111';    ctx.fillRect(-5,-4,11,21);
+  ctx.fillStyle = '#cc0000'; ctx.fillRect(-4,15,9,16);
+  ctx.fillStyle = '#fff';    ctx.fillRect(-4,27,9,3);
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-6,29,14,7); ctx.fillRect(-7,34,16,4);
+  ctx.fillStyle = '#333';    ctx.fillRect(-5,30,8,3);
   ctx.restore();
 
-  // Right leg
+  // ── RIGHT LEG ─────────────────────────────────────────────
   ctx.save();
-  ctx.translate(ls * 0.5, 0);
-  if(rot !== 0) ctx.rotate(-rot * 0.4);
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-5, -4, 10, 18);
-  ctx.fillStyle = '#cc0000';
-  ctx.fillRect(-4, 12, 9, 14);
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-6, 24, 13, 6);
-  ctx.fillRect(-7, 28, 15, 4);
+  ctx.translate(ls * 0.55, 0);
+  if(rot !== 0) ctx.rotate(-rot * 0.45);
+  ctx.fillStyle = '#111';    ctx.fillRect(-5,-4,11,21);
+  ctx.fillStyle = '#cc0000'; ctx.fillRect(-4,15,9,16);
+  ctx.fillStyle = '#fff';    ctx.fillRect(-4,27,9,3);
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-6,29,14,7); ctx.fillRect(-7,34,16,4);
+  ctx.fillStyle = '#333';    ctx.fillRect(-5,30,8,3);
   ctx.restore();
 
-  // ── torso ─────────────────────────────────────────────────
-  // Shadow side
-  drawPixelRect(0, -32, 10, 26, gcd);
-  // Main shirt
-  drawPixelRect(-10, -32, 20, 26, gc);
-  // Shirt number
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 9px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('1', 0, -14);
-  // Shirt collar
-  drawPixelRect(-4, -32, 8, 4, gcd);
-  // Shirt seam detail
-  ctx.fillStyle = gcd;
-  ctx.fillRect(-10, -22, 2, 12);
-  ctx.fillRect(8, -22, 2, 12);
+  // ── TORSO ─────────────────────────────────────────────────
+  drawPixelRect(0,-38,12,32,gcd);
+  drawPixelRect(-12,-38,24,32,gc);
+  drawPixelRect(-6,-38,12,5,gcd);        // collar
+  ctx.fillStyle=gcd; ctx.fillRect(-12,-28,3,16); ctx.fillRect(9,-28,3,16);
+  ctx.fillStyle='#fff'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+  ctx.fillText('1',0,-20);
+  drawPixelRect(-13,-6,26,14,'#111122'); // shorts
+  ctx.fillStyle='#fff'; ctx.fillRect(-13,-6,26,3);
 
-  // ── arms ─────────────────────────────────────────────────
-  const aLang = -(armRaiseL);
-  const aRang =  (armRaiseR);
+  // helper to draw one arm + glove
+  function drawArm(tx2, ty2, angle, isLead){
+    ctx.save();
+    ctx.translate(tx2, ty2);
+    ctx.rotate(angle);
+    ctx.fillStyle=gc;  ctx.fillRect(-4,0,9,15);
+    ctx.fillStyle=gcd; ctx.fillRect(-4,13,9,4);
+    ctx.fillStyle=gc;  ctx.fillRect(-4,16,9,13);
 
-  // Left arm
-  ctx.save();
-  ctx.translate(-12, -26);
-  ctx.rotate(aLang);
-  ctx.fillStyle = gc;
-  ctx.fillRect(-4, 0, 8, 16);
-  // Glove
-  ctx.fillStyle = glov;
-  ctx.fillRect(-5, 14, 10, 9);
-  // Glove fingers detail
-  ctx.fillStyle = '#cc9900';
-  ctx.fillRect(-5, 14, 2, 9);
-  ctx.fillRect(-1, 14, 2, 9);
-  ctx.fillRect(3,  14, 2, 9);
-  // Glove shine
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillRect(-4, 15, 4, 3);
-  ctx.restore();
+    if(catchPose){
+      // Open cupped palm — fingers spread
+      ctx.fillStyle=glov;  ctx.fillRect(-7,27,15,11);
+      ctx.fillStyle='#ff9900'; ctx.fillRect(-7,27,15,3);
+      ctx.fillStyle=glovD;
+      for(let f=0;f<4;f++) ctx.fillRect(-6+f*3,29,2,9);
+      ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.fillRect(-6,28,5,3);
+    } else if(deflectPose && isLead){
+      // Flat palm facing out — fingertip deflect
+      ctx.fillStyle=glov;  ctx.fillRect(-9,27,18,6);
+      ctx.fillStyle='#ff9900'; ctx.fillRect(-9,27,18,2);
+      ctx.fillStyle=glovD;
+      for(let f=0;f<5;f++) ctx.fillRect(-8+f*3,29,2,4);
+      ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.fillRect(-8,28,5,2);
+    } else {
+      // Standard ready glove
+      ctx.fillStyle=glov;  ctx.fillRect(-5,27,11,11);
+      ctx.fillStyle=glovD; ctx.fillRect(-5,27,2,11); ctx.fillRect(-1,27,2,11); ctx.fillRect(3,27,2,11);
+      ctx.fillStyle='rgba(255,255,255,0.32)'; ctx.fillRect(-4,28,4,3);
+    }
+    ctx.restore();
+  }
 
-  // Right arm
-  ctx.save();
-  ctx.translate(12, -26);
-  ctx.rotate(aRang);
-  ctx.fillStyle = gc;
-  ctx.fillRect(-4, 0, 8, 16);
-  ctx.fillStyle = glov;
-  ctx.fillRect(-5, 14, 10, 9);
-  ctx.fillStyle = '#cc9900';
-  ctx.fillRect(-5, 14, 2, 9);
-  ctx.fillRect(-1, 14, 2, 9);
-  ctx.fillRect(3,  14, 2, 9);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillRect(-4, 15, 4, 3);
-  ctx.restore();
+  drawArm(-14,-32,-armRaiseL, dir<0);
+  drawArm( 14,-32, armRaiseR, dir>0);
 
-  // ── head ─────────────────────────────────────────────────
-  // Neck
-  drawPixelRect(-4, -36, 8, 6, sk);
-  // Head
-  drawPixelRect(-10, -54, 20, 20, sk);
-  // Hair
-  drawPixelRect(-10, -54, 20, 7, '#4a2000');
-  // Ears
-  drawPixelRect(-12, -48, 4, 6, sk);
-  drawPixelRect(8,   -48, 4, 6, sk);
-  // Eyes — track ball direction
-  const eyeOff = dir * 2;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(px(-7 + eyeOff), -46, 5, 5);
-  ctx.fillRect(px( 2 + eyeOff), -46, 5, 5);
-  ctx.fillStyle = '#1a1a8c';
-  ctx.fillRect(px(-6 + eyeOff), -45, 3, 3);
-  ctx.fillRect(px( 3 + eyeOff), -45, 3, 3);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(px(-5 + eyeOff), -44, 2, 2);
-  ctx.fillRect(px( 4 + eyeOff), -44, 2, 2);
-  // Eyebrow (furrowed on dive)
-  const browTilt = (phase==='dive'||phase==='pushoff') ? 2 : 0;
-  ctx.fillStyle = '#4a2000';
-  ctx.fillRect(px(-7 + eyeOff), -48 + browTilt, 5, 2);
-  ctx.fillRect(px( 2 + eyeOff), -48 - browTilt, 5, 2);
-  // Mouth — determined expression
-  ctx.fillStyle = '#c0705a';
-  ctx.fillRect(px(-3), -41, 6, 2);
-  // GK cap
-  drawPixelRect(-11, -56, 22, 5, '#cc0000');
-  drawPixelRect(-13, -52, 4, 3,  '#cc0000'); // brim left
-  drawPixelRect( 9,  -52, 4, 3,  '#cc0000'); // brim right
+  // ── HEAD ──────────────────────────────────────────────────
+  drawPixelRect(-5,-44,10,8,sk);          // neck
+  drawPixelRect(-13,-66,26,24,sk);        // head
+  drawPixelRect(-13,-66,26,7,'#3a1800'); // hair
+  drawPixelRect(-15,-58,5,7,sk);          // left ear
+  drawPixelRect(10, -58,5,7,sk);          // right ear
 
-  // ── glove glow aura on dive ────────────────────────────────
-  if(phase === 'dive' || phase === 'pushoff'){
-    const gAlpha = 0.3 + Math.sin(frame * 0.3) * 0.1;
-    ctx.fillStyle = `rgba(255,232,0,${gAlpha})`;
-    // Reaching glove
-    if(dir < 0){
-      ctx.save(); ctx.translate(-12,-26); ctx.rotate(aLang);
-      ctx.beginPath(); ctx.arc(0, 20, 12, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-    } else if(dir > 0){
-      ctx.save(); ctx.translate(12,-26); ctx.rotate(aRang);
-      ctx.beginPath(); ctx.arc(0, 20, 12, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
+  const eyeOff = dir * 3;
+  const isDiving = ['pushoff','dive','dive_catch','dive_deflect','hold'].includes(phase);
+
+  // whites
+  ctx.fillStyle='#fff';
+  ctx.fillRect(px(-9+eyeOff),-58,7,8);
+  ctx.fillRect(px( 2+eyeOff),-58,7,8);
+  // iris
+  ctx.fillStyle='#1a3aaa';
+  ctx.fillRect(px(-8+eyeOff),-57,5,5);
+  ctx.fillRect(px( 3+eyeOff),-57,5,5);
+  // pupil
+  ctx.fillStyle='#000';
+  ctx.fillRect(px(-7+eyeOff),-56,3,3);
+  ctx.fillRect(px( 4+eyeOff),-56,3,3);
+
+  // eyebrows
+  ctx.fillStyle='#3a1800';
+  if(isDiving){
+    ctx.fillRect(px(-9+eyeOff),-61+2,6,2);
+    ctx.fillRect(px( 2+eyeOff),-61-2,6,2);
+  } else if(phase==='hold'){
+    ctx.fillRect(px(-9+eyeOff),-63,6,2);
+    ctx.fillRect(px( 2+eyeOff),-63,6,2);
+  } else {
+    ctx.fillRect(px(-9+eyeOff),-61,6,2);
+    ctx.fillRect(px( 2+eyeOff),-61,6,2);
+  }
+
+  // mouth
+  ctx.fillStyle='#c0705a';
+  if(isDiving){
+    ctx.fillRect(px(-5),-51,10,3);
+    ctx.fillStyle='#6a2010'; ctx.fillRect(px(-4),-50,8,2);
+  } else if(phase==='hold'){
+    ctx.fillRect(px(-6),-51,12,2);
+    ctx.fillRect(px(-6),-51,2,5);
+    ctx.fillRect(px( 4),-51,2,5);
+  } else {
+    ctx.fillRect(px(-4),-51,8,2);
+  }
+
+  // cap
+  drawPixelRect(-14,-68,28,5,'#cc0000');
+  drawPixelRect(-16,-63,5,3,'#cc0000');
+  drawPixelRect(11, -63,5,3,'#cc0000');
+  ctx.fillStyle='#fff'; ctx.fillRect(-2,-67,4,3); // badge
+
+  // ── GLOVE GLOW AURA ───────────────────────────────────────
+  if(isDiving || catchPose || deflectPose){
+    const ga = 0.26 + Math.sin(frame*0.38)*0.12;
+    const gc2 = catchPose   ? `rgba(0,255,130,${ga})`   :
+                deflectPose ? `rgba(0,190,255,${ga})`   :
+                              `rgba(255,230,0,${ga})`;
+    ctx.save();
+    if(dir < 0){ ctx.translate(-14,-32); ctx.rotate(-armRaiseL); }
+    else        { ctx.translate( 14,-32); ctx.rotate( armRaiseR); }
+    ctx.fillStyle = gc2;
+    ctx.beginPath();
+    ctx.arc(0, catchPose?32:28, catchPose?15:12, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── CATCH SPARKLE ─────────────────────────────────────────
+  if(phase==='hold' && fc < 16){
+    const sf = fc / 16;
+    for(let i=0;i<6;i++){
+      const a = (i/6)*Math.PI*2 + frame*0.25;
+      const r2 = 20 + sf*12;
+      ctx.fillStyle=`rgba(255,255,80,${0.9*(1-sf)})`;
+      const spx = (dir<0?-14:14) + Math.cos(a)*r2;
+      const spy = -32 + Math.sin(a)*r2;
+      ctx.fillRect(px(spx-2),py(spy-2),4,4);
     }
   }
 
@@ -1183,52 +1320,85 @@ function drawLeg(x, y, angle, side){
 function drawAimReticle(){
   if(state!=='aiming') return;
   const x=aimX, y=aimY;
-  const t=frame;
 
-  // Pulsing outer ring
-  const pulse=1+0.1*Math.sin(t*0.12);
-  const r=20*pulse;
-  ctx.strokeStyle='rgba(255,255,0,0.8)';
-  ctx.lineWidth=2;
-  ctx.setLineDash([4,4]);
-  ctx.beginPath();
-  ctx.arc(px(x),py(y),r,0,Math.PI*2);
-  ctx.stroke();
+  // ── Goal frame bounds (match drawGoal constants) ─────────
+  const GOAL_LX  = W * 0.305;
+  const GOAL_RX  = W * 0.695 + 8;
+  const GOAL_TOP = H * 0.27;
+  const GOAL_BOT = H * 0.50;
+  const inGoal   = x >= GOAL_LX && x <= GOAL_RX && y >= GOAL_TOP && y <= GOAL_BOT;
+
+  // ── Goal-zone bracket overlay ────────────────────────────
+  const zoneAlpha = 0.30 + 0.12 * Math.sin(frame * 0.12);
+  ctx.strokeStyle = inGoal
+    ? `rgba(0,255,100,${zoneAlpha})`
+    : `rgba(255,60,60,${zoneAlpha * 0.6})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5,5]);
+  ctx.strokeRect(px(GOAL_LX), py(GOAL_TOP), px(GOAL_RX - GOAL_LX), py(GOAL_BOT - GOAL_TOP));
   ctx.setLineDash([]);
 
-  // Crosshair
-  ctx.strokeStyle='rgba(255,255,0,0.9)';
-  ctx.lineWidth=2;
-  const cs=14;
+  // Corner brackets
+  const blen = 14;
+  ctx.strokeStyle = `rgba(0,255,120,${0.45 + 0.15*Math.sin(frame*0.1)})`;
+  ctx.lineWidth = 2;
+  [[GOAL_LX+1, GOAL_TOP+1, 1, 1],[GOAL_RX-1, GOAL_TOP+1, -1, 1],
+   [GOAL_LX+1, GOAL_BOT-1, 1,-1],[GOAL_RX-1, GOAL_BOT-1, -1,-1]].forEach(([cx3,cy3,sx2,sy2])=>{
+    ctx.beginPath();
+    ctx.moveTo(cx3, cy3 + sy2*blen); ctx.lineTo(cx3, cy3); ctx.lineTo(cx3 + sx2*blen, cy3);
+    ctx.stroke();
+  });
+
+  // ── Crosshair: green inside, red outside ─────────────────
+  const hairCol = inGoal ? 'rgba(0,255,120,0.92)' : 'rgba(255,70,70,0.88)';
+  const pulse   = 1 + 0.1 * Math.sin(frame * 0.12);
+  const r       = 20 * pulse;
+
+  ctx.strokeStyle = hairCol;
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.arc(px(x), py(y), r, 0, Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const cs = 14;
+  ctx.strokeStyle = hairCol;
+  ctx.lineWidth   = 2;
   ctx.beginPath();
   ctx.moveTo(px(x-cs),py(y)); ctx.lineTo(px(x-6),py(y));
-  ctx.moveTo(px(x+6),py(y));  ctx.lineTo(px(x+cs),py(y));
+  ctx.moveTo(px(x+6), py(y)); ctx.lineTo(px(x+cs),py(y));
   ctx.moveTo(px(x),py(y-cs)); ctx.lineTo(px(x),py(y-6));
   ctx.moveTo(px(x),py(y+6));  ctx.lineTo(px(x),py(y+cs));
   ctx.stroke();
 
-  // Center dot
-  ctx.fillStyle='#ff0';
-  ctx.fillRect(px(x-2),py(y-2),4,4);
+  ctx.fillStyle = inGoal ? '#00ff88' : '#ff4444';
+  ctx.fillRect(px(x-2), py(y-2), 4, 4);
 
-  // Charge indicator arc — colour matches current power zone
+  // "MISS" warning when aimed outside posts
+  if(!inGoal){
+    const warnAlpha = 0.65 + 0.35 * Math.sin(frame * 0.28);
+    ctx.fillStyle = `rgba(255,60,60,${warnAlpha})`;
+    ctx.font = '6px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText('OUT OF POST!', px(x), py(y - r - 6));
+  }
+
+  // ── Charge arc — zone colour ──────────────────────────────
   if(isCharging){
-    chargeLevel=Math.min(chargeLevel+0.018,1);
-    const zone = getZone(chargeLevel);
-    const chargeR=r+10+chargeLevel*25;
+    chargeLevel = Math.min(chargeLevel + 0.018, 1);
+    const zone    = getZone(chargeLevel);
+    const chargeR = r + 10 + chargeLevel * 25;
     ctx.strokeStyle = zone.col;
-    ctx.lineWidth=3;
+    ctx.lineWidth   = 3;
     ctx.beginPath();
-    ctx.arc(px(x),py(y),chargeR,-Math.PI/2,-Math.PI/2+chargeLevel*Math.PI*2);
+    ctx.arc(px(x), py(y), chargeR, -Math.PI/2, -Math.PI/2 + chargeLevel*Math.PI*2);
     ctx.stroke();
 
-    // Zone label near reticle
-    ctx.fillStyle = zone.col;
-    ctx.font='bold 7px "Press Start 2P"';
-    ctx.textAlign='center';
+    ctx.fillStyle   = zone.col;
+    ctx.font        = 'bold 7px "Press Start 2P"';
+    ctx.textAlign   = 'center';
     ctx.shadowColor = zone.col;
     ctx.shadowBlur  = 8;
-    ctx.fillText(zone.label, px(x), py(y+chargeR+16));
+    ctx.fillText(zone.label, px(x), py(y + chargeR + 16));
     ctx.shadowBlur  = 0;
   }
 }
@@ -1538,17 +1708,14 @@ function update(){
     shake.x=0; shake.y=0;
   }
 
-  // GK animation phase driven by frameCount inside drawGoalkeeper()
-  // Start dive sequence once ball is in flight (after ~8 frames)
-  if(gkAnim && state==='kicking'){
-    if(gkAnim.phase==='idle'){
-      // stays idle until ball is kicked — drawGoalkeeper handles frameCount
+  // GK reacts when ball is ~30% through its flight
+  if(gkAnim && gkAnim.phase === 'idle' && ballAnim && ballAnim.t > Math.floor(ballAnim.dur * 0.28)){
+    if(gkAnim.outcome === 'watch'){
+      gkAnim.phase = 'watch';
+    } else {
+      gkAnim.phase = 'ready';
     }
-    // Trigger ready phase when ball animation starts
-    if(gkAnim.phase==='idle' && ballAnim && ballAnim.t > 5){
-      gkAnim.phase='ready';
-      gkAnim.frameCount=0;
-    }
+    gkAnim.frameCount = 0;
   }
 
   drawArrowKeyAim();
