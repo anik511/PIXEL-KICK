@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIXEL KICK — Retro Arcade Soccer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Press Start 2P', monospace;
+  }
+
+  #wrapper {
+    position: relative;
+    width: 640px;
+    height: 480px;
+  }
+
+  #gameCanvas {
+    display: block;
+    image-rendering: pixelated;
+    cursor: none;
+  }
+
+  /* CRT overlay */
+  #crt {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+    background:
+      repeating-linear-gradient(
+        0deg,
+        rgba(0,0,0,0.08) 0px,
+        rgba(0,0,0,0.08) 1px,
+        transparent 1px,
+        transparent 3px
+      );
+    border-radius: 4px;
+  }
+
+  #crt::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.55) 100%);
+    border-radius: 4px;
+  }
+
+  #scanline {
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 20%;
+    background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(255,255,255,0.03) 50%,
+      transparent 100%
+    );
+    animation: scan 8s linear infinite;
+    pointer-events: none;
+    z-index: 11;
+  }
+
+  @keyframes scan {
+    0%   { top: -20%; }
+    100% { top: 110%; }
+  }
+
+  #title-screen {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #000810;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    gap: 20px;
+  }
+
+  .title-glow {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 32px;
+    color: #fff;
+    text-shadow:
+      0 0 10px #0ff,
+      0 0 30px #0ff,
+      0 0 60px #0af,
+      4px 4px 0 #006;
+    animation: titlePulse 1.5s ease-in-out infinite alternate;
+    letter-spacing: 4px;
+  }
+
+  .title-sub {
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: #ff0;
+    text-shadow: 2px 2px 0 #880, 0 0 15px #ff0;
+    animation: blink 0.8s step-end infinite;
+  }
+
+  .title-info {
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    color: #0f8;
+    text-align: center;
+    line-height: 28px;
+    text-shadow: 0 0 8px #0f8;
+  }
+
+  @keyframes titlePulse {
+    from { text-shadow: 0 0 10px #0ff, 0 0 30px #0ff, 4px 4px 0 #006; }
+    to   { text-shadow: 0 0 20px #0ff, 0 0 50px #0af, 0 0 80px #08f, 4px 4px 0 #006; }
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+
+  #hud {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 9;
+  }
+
+  .score-display {
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    color: #fff;
+    text-shadow: 0 0 8px #0ff, 2px 2px 0 #004;
+    white-space: nowrap;
+  }
+
+  .shots-display {
+    position: absolute;
+    top: 30px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'VT323', monospace;
+    font-size: 18px;
+    color: #ff0;
+    text-shadow: 0 0 6px #ff0;
+    white-space: nowrap;
+  }
+
+  #outcome-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 28px;
+    color: #fff;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 15;
+    transition: opacity 0.1s;
+    white-space: nowrap;
+  }
+
+  #combo-text {
+    position: absolute;
+    top: 38%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: #ff0;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 15;
+    text-shadow: 0 0 10px #ff0;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <canvas id="gameCanvas" width="640" height="480"></canvas>
+  <div id="crt"></div>
+  <div id="scanline"></div>
+  <div id="hud">
+    <div class="score-display" id="scoreDisplay">GOALS: 0 | SHOTS: 0</div>
+    <div class="shots-display" id="shotsDisplay">ARROWS/MOUSE → AIM  |  HOLD SPACE → CHARGE  |  RELEASE → SHOOT</div>
+  </div>
+  <div id="outcome-text"></div>
+  <div id="combo-text"></div>
+
+  <div id="title-screen">
+    <div class="title-glow">PIXEL KICK</div>
+    <div style="font-family:'VT323',monospace;font-size:18px;color:#888;text-shadow:1px 1px 0 #333;">RETRO ARCADE SOCCER ©1987</div>
+    <div class="title-sub" style="margin-top:10px;">— INSERT COIN —</div>
+    <div class="title-info">
+      MOUSE / ARROWS → AIM<br>
+      HOLD SPACE → CHARGE POWER<br>
+      RELEASE SPACE → SHOOT<br>
+      CLICK → SKIP / RESTART
+    </div>
+    <div style="margin-top:8px;font-family:'VT323',monospace;font-size:14px;color:#555;">HI-SCORE: 9999</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 640, H = 480;
+
+// ─── STATE ───────────────────────────────────────────────
+let state = 'title'; // title | aiming | kicking | result | gameover
+let score = 0, totalShots = 0, combo = 0, maxCombo = 0;
+let aimX = W/2, aimY = H/2;
+let camBob = 0, camBobTime = 0;
+let shake = {x:0, y:0, power:0};
+let particles = [];
+let crowdParticles = [];
+let stars = [];
+let flickerFrames = 0;
+let resultTimer = 0;
+let currentOutcome = '';
+let ballAnim = null; // ball flight state
+let kickAnim = null; // leg kick state
+let gkAnim = null;   // goalkeeper dive state
+let ballShadow = {x:W/2, y:H*0.72, r:12};
+let celebrationTimer = 0;
+let crowdCheerLevel = 0;
+let crowdBaseNoise = [];
+let frame = 0;
+let curveDir = 0;
+let chargeLevel = 0;
+let isCharging = false;
+const MAX_SHOTS = 5;
+let shotsLeft = MAX_SHOTS;
+
+// ─── INIT ─────────────────────────────────────────────────
+for(let i=0;i<80;i++) stars.push({x:Math.random()*W,y:Math.random()*(H*0.35),b:Math.random()});
+for(let i=0;i<60;i++) crowdBaseNoise.push({x:Math.random()*W,y:H*0.18+Math.random()*H*0.14,c:randCrowdColor(),phase:Math.random()*Math.PI*2});
+
+function randCrowdColor(){
+  const cols=['#ff3333','#3366ff','#ffff00','#ffffff','#33cc33','#ff9900','#cc33ff','#00ffff'];
+  return cols[Math.floor(Math.random()*cols.length)];
+}
+
+// ─── INPUT ────────────────────────────────────────────────
+let keys = {};
+// Prevent arrow keys and space from scrolling the page
+document.addEventListener('keydown', e=>{
+  if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code)) e.preventDefault();
+  keys[e.code]=true;
+
+  if(e.code==='Space'){
+    if(state==='title')   { startGame(); return; }
+    if(state==='aiming')  { if(!isCharging){ isCharging=true; chargeLevel=0; } return; }
+    if(state==='result')  { nextShot(); return; }
+    if(state==='gameover'){ initGame(); return; }
+  }
+  if(e.code==='Enter'){
+    if(state==='title')   { startGame(); return; }
+    if(state==='result')  { nextShot(); return; }
+    if(state==='gameover'){ initGame(); return; }
+  }
+});
+
+document.addEventListener('keyup', e=>{
+  keys[e.code]=false;
+  // Space release fires the shot
+  if(e.code==='Space' && state==='aiming' && isCharging){
+    shoot();
+    isCharging=false;
+  }
+});
+
+// Mouse: move updates aim, click only restarts (no shoot-on-click to avoid conflicts)
+canvas.addEventListener('mousemove', e=>{
+  const r=canvas.getBoundingClientRect();
+  aimX=e.clientX-r.left;
+  aimY=e.clientY-r.top;
+});
+
+// Click is ONLY for title/result/gameover transitions, never for shooting
+canvas.addEventListener('click', e=>{
+  if(state==='title')   { startGame(); return; }
+  if(state==='result')  { nextShot(); return; }
+  if(state==='gameover'){ initGame(); return; }
+});
+
+// ─── GAME LOGIC ───────────────────────────────────────────
+function startGame(){ document.getElementById('title-screen').style.display='none'; initGame(); }
+
+function initGame(){
+  score=0; totalShots=0; combo=0; maxCombo=0; shotsLeft=MAX_SHOTS;
+  particles=[];
+  updateHUD();
+  state='aiming';
+  chargeLevel=0;
+  isCharging=false;
+  crowdCheerLevel=0;
+}
+
+function nextShot(){
+  // Reset all animation state for a fresh shot
+  ballAnim=null; kickAnim=null; gkAnim=null;
+  chargeLevel=0;
+  isCharging=false;
+  showOutcome('', '');
+
+  if(shotsLeft<=0){
+    state='gameover';
+    updateHUD();
+    return;
+  }
+  state='aiming';
+  updateHUD();
+}
+
+function shoot(){
+  if(state!=='aiming') return;
+  state='kicking';
+  totalShots++;
+  shotsLeft--;
+
+  // Randomise outcome with weighting
+  const roll = Math.random();
+  let outcome;
+  if(roll < 0.40)      outcome='goal';
+  else if(roll < 0.62) outcome='save';
+  else if(roll < 0.74) outcome='post';
+  else if(roll < 0.82) outcome='miss';
+  else                  outcome='curve'; // rare curved shot that goes in
+
+  // Aim normalised (-1..1)
+  const nx = (aimX/W)*2-1;
+  const ny = (aimY/H)*2-1;
+
+  // Ball target on far end
+  const power = 0.5 + chargeLevel*0.5; // 0.5–1
+  let targetX, targetY;
+
+  if(outcome==='goal'||outcome==='curve'){
+    // Aim towards goal with slight deviation
+    targetX = W/2 + nx*(W*0.28);
+    targetY = H*0.32 + ny*(H*0.08);
+  } else if(outcome==='save'){
+    targetX = W/2 + nx*(W*0.22);
+    targetY = H*0.33;
+  } else if(outcome==='post'){
+    // Land near post
+    targetX = (Math.random()<0.5) ? W*0.305 : W*0.695;
+    targetY = H*0.30 + Math.random()*0.08*H;
+  } else {
+    // Miss wide or over
+    if(Math.random()<0.5) targetX = (Math.random()<0.5) ? W*0.1 : W*0.9;
+    else { targetX = W/2 + nx*(W*0.3); targetY = H*0.05; }
+    targetY = targetY||H*0.05;
+  }
+
+  curveDir = (outcome==='curve') ? (Math.random()<0.5?1:-1) : 0;
+
+  // GK dive for save
+  if(outcome==='save'){
+    const diveDir = (targetX < W/2) ? -1 : 1;
+    gkAnim={ t:0, dir:diveDir, diving:false };
+  } else {
+    gkAnim={ t:0, dir:0, diving:false };
+  }
+
+  currentOutcome = outcome;
+  kickAnim = { t:0, phase:'windup' };
+  ballAnim = {
+    sx:W/2, sy:H*0.68, tx:targetX, ty:targetY,
+    t:0, dur:outcome==='miss'?55:48, power, outcome,
+    curveDir,
+    spin:0
+  };
+
+  resultTimer=0;
+}
+
+function resolveOutcome(o){
+  const msgs = {
+    goal:  ['⚽ GOAL!!','NETS BULGING!','WORLD CLASS!','SCREAMER!!'],
+    save:  ['SAVED!','KEEPER STOPS IT!','GREAT SAVE!','DENIED!!'],
+    post:  ['POST!!','OFF THE WOODWORK!','SO CLOSE!!','RATTLES THE POST!'],
+    miss:  ['MISSED!','OVER THE BAR!','WIDE LEFT!','SKIED IT!'],
+    curve: ['CURVED IN!!','WHAT A STRIKE!','ROBERTO CARLOS!','BANANA SHOT!!']
+  };
+  const list = msgs[o]||['...'];
+  return list[Math.floor(Math.random()*list.length)];
+}
+
+function processResult(o){
+  // Update score & combo
+  if(o==='goal'||o==='curve'){
+    score++;
+    combo++;
+    if(combo>maxCombo) maxCombo=combo;
+    crowdCheerLevel=1;
+    spawnGoalParticles();
+    triggerShake(8,18);
+  } else if(o==='post'){
+    triggerShake(5,10);
+    combo=0;
+  } else if(o==='save'){
+    triggerShake(3,8);
+    combo=0;
+  } else {
+    combo=0;
+  }
+
+  state='result';
+  resultTimer=0;
+  updateHUD();
+  showOutcome(resolveOutcome(o), o);
+
+  // Auto-advance after delay
+  const delay = shotsLeft<=0 ? 2500 : 2000;
+  setTimeout(()=>{
+    if(state==='result') nextShot();
+  }, delay);
+}
+
+function updateHUD(){
+  document.getElementById('scoreDisplay').textContent=`GOALS: ${score} | SHOTS: ${totalShots}`;
+  if(state==='aiming'){
+    document.getElementById('shotsDisplay').textContent=`⚽ x${shotsLeft}  |  AIM: MOUSE/ARROWS  SHOOT: HOLD+RELEASE SPACE`;
+  } else if(state==='kicking'){
+    document.getElementById('shotsDisplay').textContent='';
+  } else {
+    document.getElementById('shotsDisplay').textContent='';
+  }
+}
+
+// ─── PARTICLES ────────────────────────────────────────────
+function spawnGoalParticles(){
+  const colors=['#ff0','#f0f','#0ff','#0f0','#f80','#fff','#f44'];
+  for(let i=0;i<80;i++){
+    const ang=Math.random()*Math.PI*2;
+    const spd=2+Math.random()*6;
+    particles.push({
+      x:W/2+Math.random()*200-100, y:H*0.45,
+      vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd-4,
+      life:1, decay:0.012+Math.random()*0.015,
+      r:3+Math.random()*5,
+      color:colors[Math.floor(Math.random()*colors.length)],
+      shape:Math.random()<0.4?'star':'circle'
+    });
+  }
+  // Crowd reaction particles
+  for(let i=0;i<30;i++){
+    crowdParticles.push({
+      x:Math.random()*W, y:H*0.18+Math.random()*H*0.15,
+      vy:-(1+Math.random()*3),
+      life:1, decay:0.02,
+      color:randCrowdColor(), r:4+Math.random()*4
+    });
+  }
+}
+
+function spawnPostParticles(px,py){
+  for(let i=0;i<20;i++){
+    const ang=Math.random()*Math.PI*2;
+    particles.push({
+      x:px,y:py,
+      vx:Math.cos(ang)*3, vy:Math.sin(ang)*3,
+      life:1,decay:0.03,r:3+Math.random()*3,
+      color:'#fff',shape:'circle'
+    });
+  }
+}
+
+function spawnSaveParticles(px,py){
+  for(let i=0;i<25;i++){
+    const ang=Math.random()*Math.PI*2;
+    particles.push({
+      x:px,y:py,
+      vx:Math.cos(ang)*2, vy:Math.sin(ang)*2-2,
+      life:1,decay:0.025,r:2+Math.random()*4,
+      color:Math.random()<0.5?'#ff4':'#0cf',shape:'circle'
+    });
+  }
+}
+
+function triggerShake(power,frames){
+  shake.power=power; shake.frames=frames;
+}
+
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy;
+    p.vy+=0.15; p.vx*=0.98;
+    p.life-=p.decay;
+    if(p.life<=0) particles.splice(i,1);
+  }
+  for(let i=crowdParticles.length-1;i>=0;i--){
+    const p=crowdParticles[i];
+    p.y+=p.vy; p.vy+=0.08;
+    p.life-=p.decay;
+    if(p.life<=0) crowdParticles.splice(i,1);
+  }
+  if(crowdCheerLevel>0) crowdCheerLevel-=0.005;
+  if(crowdCheerLevel<0) crowdCheerLevel=0;
+}
+
+// ─── DRAWING HELPERS ──────────────────────────────────────
+function px(x){ return Math.round(x); }
+function py(y){ return Math.round(y); }
+
+function drawPixelRect(x,y,w,h,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(px(x),py(y),w,h);
+}
+
+function drawStar(x,y,r,col,alpha=1){
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a=(i*Math.PI*2/5)-Math.PI/2;
+    const a2=a+Math.PI/5;
+    if(i===0) ctx.moveTo(x+Math.cos(a)*r, y+Math.sin(a)*r);
+    else ctx.lineTo(x+Math.cos(a)*r, y+Math.sin(a)*r);
+    ctx.lineTo(x+Math.cos(a2)*(r*0.4), y+Math.sin(a2)*(r*0.4));
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// ─── SCENE RENDERING ──────────────────────────────────────
+
+function drawSky(){
+  // Night sky gradient
+  const grad=ctx.createLinearGradient(0,0,0,H*0.38);
+  grad.addColorStop(0,'#000510');
+  grad.addColorStop(1,'#001a3a');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H*0.38);
+
+  // Stars
+  stars.forEach(s=>{
+    const b=0.3+s.b*0.7*(0.8+0.2*Math.sin(frame*0.02+s.b*10));
+    ctx.fillStyle=`rgba(255,255,255,${b})`;
+    ctx.fillRect(px(s.x),py(s.y),1,1);
+  });
+
+  // Moon
+  ctx.fillStyle='#fffce0';
+  ctx.beginPath();
+  ctx.arc(W*0.85,H*0.07,14,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle='#000d1a';
+  ctx.beginPath();
+  ctx.arc(W*0.85+8,H*0.07-4,11,0,Math.PI*2);
+  ctx.fill();
+}
+
+function drawCrowd(){
+  // Stands background
+  const standsGrad=ctx.createLinearGradient(0,H*0.18,0,H*0.38);
+  standsGrad.addColorStop(0,'#111122');
+  standsGrad.addColorStop(1,'#0a0a14');
+  ctx.fillStyle=standsGrad;
+  ctx.fillRect(0,py(H*0.18),W,py(H*0.20));
+
+  // Crowd rows – tiered seats
+  const rowCount=4;
+  for(let row=0;row<rowCount;row++){
+    const ry=H*0.20+row*(H*0.045);
+    for(let col=0;col<32;col++){
+      const cx2=col*(W/32)+W/64;
+      const phase=crowdBaseNoise[(row*8+col)%crowdBaseNoise.length].phase;
+      const cheer=(Math.sin(frame*0.05+phase)*0.5+0.5)*crowdCheerLevel;
+      const bob=(state==='result'&&currentOutcome==='goal')||celebrationTimer>0?Math.sin(frame*0.3+col*0.5)*4*cheer:0;
+      // Head
+      ctx.fillStyle=`hsl(${(col*37+row*77)%360},60%,55%)`;
+      ctx.fillRect(px(cx2-4),py(ry+bob-6),8,8);
+      // Body
+      ctx.fillStyle=crowdBaseNoise[(col+row*10)%crowdBaseNoise.length].c;
+      ctx.fillRect(px(cx2-5),py(ry+bob+2),10,6);
+    }
+  }
+
+  // Crowd reaction particles
+  crowdParticles.forEach(p=>{
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(px(p.x-p.r/2),py(p.y-p.r/2),p.r,p.r);
+    ctx.globalAlpha=1;
+  });
+
+  // Stadium lights (4 towers)
+  const towers=[W*0.04,W*0.25,W*0.75,W*0.96];
+  towers.forEach(tx2=>{
+    ctx.fillStyle='#1a1a2e';
+    ctx.fillRect(px(tx2-4),py(H*0.12),8,py(H*0.1));
+    // Light beam
+    const lf=0.7+0.3*Math.sin(frame*0.03+tx2);
+    const grad2=ctx.createRadialGradient(tx2,H*0.14,0,tx2,H*0.14,W*0.25);
+    grad2.addColorStop(0,`rgba(255,255,220,${0.15*lf})`);
+    grad2.addColorStop(1,'transparent');
+    ctx.fillStyle=grad2;
+    ctx.fillRect(0,py(H*0.12),W,py(H*0.2));
+    // Light head
+    ctx.fillStyle=`rgba(255,255,180,${0.8*lf})`;
+    ctx.fillRect(px(tx2-6),py(H*0.115),12,4);
+  });
+}
+
+function drawPitch(){
+  // Pitch gradient
+  const pg=ctx.createLinearGradient(0,H*0.38,0,H);
+  pg.addColorStop(0,'#0a4a0a');
+  pg.addColorStop(0.3,'#0d5c0d');
+  pg.addColorStop(1,'#062806');
+  ctx.fillStyle=pg;
+  ctx.fillRect(0,py(H*0.38),W,H);
+
+  // Pixel turf stripes
+  for(let i=0;i<8;i++){
+    const stripeH=(H-H*0.38)/8;
+    if(i%2===0){
+      ctx.fillStyle='rgba(0,80,0,0.25)';
+      ctx.fillRect(0,py(H*0.38+i*stripeH),W,py(stripeH));
+    }
+  }
+
+  // Penalty arc / D
+  ctx.strokeStyle='rgba(255,255,255,0.5)';
+  ctx.lineWidth=2;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.arc(W/2,H*0.74,W*0.14,Math.PI,0);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Penalty spot
+  ctx.fillStyle='rgba(255,255,255,0.7)';
+  ctx.fillRect(px(W/2-2),py(H*0.74-2),4,4);
+
+  // Penalty box
+  ctx.strokeStyle='rgba(255,255,255,0.5)';
+  ctx.lineWidth=2;
+  ctx.strokeRect(px(W*0.2),py(H*0.50),px(W*0.6),py(H*0.245));
+
+  // 6-yard box
+  ctx.strokeRect(px(W*0.33),py(H*0.50),px(W*0.34),py(H*0.10));
+
+  // Corner flags
+  [W*0.2,W*0.8].forEach(cx2=>{
+    ctx.fillStyle='#ff3';
+    ctx.fillRect(px(cx2-1),py(H*0.50-14),2,14);
+    ctx.fillStyle='#f00';
+    ctx.fillRect(px(cx2),py(H*0.50-15),8,6);
+  });
+}
+
+function drawGoal(){
+  // Posts
+  const postW=8;
+  const lp=W*0.305, rp=W*0.695;
+  const topY=H*0.27, botY=H*0.50;
+  const postCol='#eeeeee';
+  const shadowCol='rgba(0,0,0,0.35)';
+
+  // Back net (pixel pattern)
+  ctx.strokeStyle='rgba(200,200,200,0.18)';
+  ctx.lineWidth=1;
+  for(let nx=lp+postW;nx<rp;nx+=12){
+    ctx.beginPath(); ctx.moveTo(px(nx),py(topY)); ctx.lineTo(px(nx),py(botY)); ctx.stroke();
+  }
+  for(let ny=topY;ny<botY;ny+=10){
+    ctx.beginPath(); ctx.moveTo(px(lp+postW),py(ny)); ctx.lineTo(px(rp),py(ny)); ctx.stroke();
+  }
+
+  // Crossbar shadow
+  drawPixelRect(lp, topY+postW, rp-lp, 4, shadowCol);
+  // Left post shadow
+  drawPixelRect(lp+postW, topY, 4, botY-topY, shadowCol);
+  // Right post shadow
+  drawPixelRect(rp+postW, topY, 4, botY-topY, shadowCol);
+
+  // Posts
+  drawPixelRect(lp, topY, postW, botY-topY, postCol); // left
+  drawPixelRect(rp, topY, postW, botY-topY, postCol); // right
+  drawPixelRect(lp, topY, rp-lp+postW, postW, postCol); // crossbar
+
+  // Goal depth lines
+  ctx.strokeStyle='rgba(255,255,255,0.3)';
+  ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(px(lp),py(topY)); ctx.lineTo(px(lp+16),py(topY-18)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px(rp+postW),py(topY)); ctx.lineTo(px(rp-16+postW),py(topY-18)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px(lp+16),py(topY-18)); ctx.lineTo(px(rp-16+postW),py(topY-18)); ctx.stroke();
+}
+
+function drawGoalkeeper(){
+  if(!gkAnim) return;
+  const t=gkAnim.t;
+  const baseX=W/2;
+  const baseY=H*0.44;
+  let dx=0, dy=0, rot=0;
+
+  if(gkAnim.diving){
+    const dt=Math.min((t-0.3)/0.7,1);
+    const ease=dt<0.5?2*dt*dt:1-Math.pow(-2*dt+2,2)/2;
+    dx=gkAnim.dir*ease*90;
+    dy=-ease*20+ease*ease*30;
+    rot=gkAnim.dir*ease*0.7;
+  } else {
+    // Idle sway
+    dx=Math.sin(frame*0.06)*8;
+    dy=Math.sin(frame*0.09)*3;
+    if(t>0.25) {
+      gkAnim.diving=true;
+    }
+  }
+
+  ctx.save();
+  ctx.translate(px(baseX+dx), py(baseY+dy));
+  ctx.rotate(rot);
+
+  // Body
+  const gkCol='#ff6600'; const gkDark='#cc4400';
+  // Shirt
+  drawPixelRect(-10,-28,20,22,gkCol);
+  // Number
+  ctx.fillStyle='#fff';
+  ctx.font='bold 8px monospace';
+  ctx.textAlign='center';
+  ctx.fillText('1',-0,-12);
+  // Arms
+  drawPixelRect(-18,-26,8,16,gkCol);
+  drawPixelRect(10,-26,8,16,gkCol);
+  // Gloves
+  drawPixelRect(-20,-12,10,8,'#ffff00');
+  drawPixelRect(10,-12,10,8,'#ffff00');
+  // Shorts
+  drawPixelRect(-10,-6,20,10,'#000');
+  // Legs
+  drawPixelRect(-10,4,8,16,'#ffcc99');
+  drawPixelRect(2,4,8,16,'#ffcc99');
+  // Socks
+  drawPixelRect(-10,18,8,6,'#ff6600');
+  drawPixelRect(2,18,8,6,'#ff6600');
+  // Boots
+  drawPixelRect(-11,22,10,6,'#222');
+  drawPixelRect(1,22,10,6,'#222');
+  // Head
+  drawPixelRect(-8,-40,16,14,'#ffcc99');
+  // Hair
+  drawPixelRect(-8,-40,16,6,'#663300');
+  // Eyes
+  drawPixelRect(-5,-35,3,3,'#000');
+  drawPixelRect(2,-35,3,3,'#000');
+  // Gloves glow hint
+  ctx.fillStyle='rgba(255,255,0,0.3)';
+  ctx.fillRect(-22,-14,12,10);
+  ctx.fillRect(9,-14,12,10);
+
+  ctx.restore();
+}
+
+function drawBall(){
+  if(!ballAnim) {
+    // Static ball on spot
+    drawBallAt(W/2, H*0.69, 14, 0);
+    return;
+  }
+  const {sx,sy,tx,ty,t,dur} = ballAnim;
+  const prog=Math.min(t/dur,1);
+  const ease=prog<0.5?2*prog*prog:1-Math.pow(-2*prog+2,2)/2;
+
+  // Curve effect
+  const curvePush = curveDir * Math.sin(prog*Math.PI) * 60;
+
+  const bx=sx+(tx-sx)*ease + curvePush;
+  // Arc trajectory
+  const arc=Math.sin(prog*Math.PI)*(-80*(ballAnim.power));
+  const by=sy+(ty-sy)*ease+arc;
+
+  // Scale (perspective shrink)
+  const scale=1-prog*0.55;
+  const r=14*scale;
+
+  // Spin
+  ballAnim.spin += 0.3+prog*0.2;
+
+  drawBallAt(bx,by,r,ballAnim.spin);
+
+  // Ball shadow on pitch
+  const shadowProg=prog;
+  const sx2=sx+(W/2-sx)*shadowProg;
+  const sy2=H*0.72;
+  const sr=12*(1-prog*0.5);
+  ctx.fillStyle=`rgba(0,0,0,${0.35*(1-prog*0.4)})`;
+  ctx.beginPath();
+  ctx.ellipse(px(sx2),py(sy2),sr,sr*0.35,0,0,Math.PI*2);
+  ctx.fill();
+
+  // Advance animation
+  ballAnim.t++;
+  if(ballAnim.t>=ballAnim.dur && !ballAnim.resolved){
+    ballAnim.resolved = true; // prevent double-fire
+    const outcome = ballAnim.outcome;
+    if(outcome==='post') spawnPostParticles(tx,ty);
+    if(outcome==='save') spawnSaveParticles(tx,ty);
+    ballAnim = null;
+    processResult(outcome); // ← was wrongly calling resolveOutcome() which only returns a string
+  }
+}
+
+function drawBallAt(x,y,r,spin){
+  ctx.save();
+  ctx.translate(px(x),py(y));
+
+  // Shadow under ball
+  ctx.fillStyle='rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(0,r*0.8,r*0.9,r*0.3,0,0,Math.PI*2);
+  ctx.fill();
+
+  // Main ball
+  ctx.beginPath();
+  ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.fillStyle='#fff';
+  ctx.fill();
+  ctx.strokeStyle='#ddd';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  // Pixel pentagons (soccer pattern)
+  ctx.save();
+  ctx.rotate(spin);
+  ctx.clip(); // Clip to ball
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.clip();
+
+  const patches=[
+    {x:0,y:0},
+    {x:r*0.5,y:r*0.5},{x:-r*0.5,y:r*0.5},
+    {x:r*0.5,y:-r*0.5},{x:-r*0.5,y:-r*0.5}
+  ];
+  patches.forEach(p=>{
+    ctx.fillStyle='#222';
+    const ps=r*0.38;
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a=i*(Math.PI*2/5)-Math.PI/2;
+      if(i===0) ctx.moveTo(p.x+Math.cos(a)*ps, p.y+Math.sin(a)*ps);
+      else ctx.lineTo(p.x+Math.cos(a)*ps, p.y+Math.sin(a)*ps);
+    }
+    ctx.closePath();
+    ctx.fill();
+  });
+  ctx.restore();
+
+  // Shine
+  ctx.fillStyle='rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(-r*0.25,-r*0.3,r*0.22,r*0.14,-0.6,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawLegs(){
+  const bobY=camBob;
+  const baseX=W/2;
+  const baseY=H;
+
+  // Kick animation or idle bob
+  let lKickAngle=0, rKickAngle=0, lY=0, rY=0;
+  const walkCycle=Math.sin(frame*0.08)*0.2;
+
+  if(kickAnim){
+    const t=kickAnim.t/60;
+    if(kickAnim.phase==='windup'){
+      // Right leg windup (pull back)
+      rKickAngle= -0.6 - Math.min(t/0.25,1)*0.8;
+      lKickAngle=walkCycle;
+      kickAnim.t++;
+      if(kickAnim.t>=15){ kickAnim.phase='kick'; kickAnim.t=0; }
+    } else if(kickAnim.phase==='kick'){
+      // Right leg swing forward
+      const kp=Math.min(kickAnim.t/20,1);
+      const ease=kp<0.5?4*kp*kp*kp:(kp-1)*(2*kp-2)*(2*kp-2)+1;
+      rKickAngle= -1.4 + ease*2.4;
+      lKickAngle=-0.15;
+      kickAnim.t++;
+      if(kickAnim.t>=20){ kickAnim.phase='followthrough'; kickAnim.t=0; }
+    } else {
+      // Follow through
+      const fp=Math.min(kickAnim.t/25,1);
+      rKickAngle= 1.0 - fp*0.8;
+      lKickAngle=-0.1+fp*0.1;
+      kickAnim.t++;
+      if(kickAnim.t>=25){ kickAnim=null; }
+    }
+  } else {
+    // Idle walking bob
+    lKickAngle=Math.sin(frame*0.08)*0.15;
+    rKickAngle=Math.sin(frame*0.08+Math.PI)*0.15;
+  }
+
+  // Draw two legs
+  drawLeg(baseX-60, baseY+bobY, lKickAngle, 'left');
+  drawLeg(baseX+20, baseY+bobY, rKickAngle, 'right');
+}
+
+function drawLeg(x, y, angle, side){
+  ctx.save();
+  ctx.translate(px(x), py(y));
+  ctx.rotate(angle);
+
+  // Thigh (shorts)
+  const shortCol='#001f5c';
+  drawPixelRect(-12,-60,24,32,shortCol);
+  // Shorts stripe
+  ctx.fillStyle='#ffffff';
+  ctx.fillRect(px(-12),py(-28),24,4);
+
+  // Knee
+  drawPixelRect(-10,-30,20,8,'#e8c49a');
+
+  // Shin / sock
+  const sockCol='#cc0000';
+  const legY=-22;
+  ctx.rotate(angle*0.4); // lower leg follows
+  drawPixelRect(-9,legY,18,38,sockCol);
+  // Sock stripe
+  ctx.fillStyle='#fff';
+  ctx.fillRect(-9,legY+30,18,4);
+
+  // Cleat / boot
+  const bootCol='#111';
+  const bootHighlight='#333';
+  drawPixelRect(-11,legY+34,22,12,bootCol);
+  // Sole
+  drawPixelRect(-13,legY+44,26,6,bootCol);
+  // Boot toe highlight
+  drawPixelRect(-9,legY+35,14,4,bootHighlight);
+  // Boot laces
+  ctx.fillStyle='#fff';
+  for(let i=0;i<3;i++){
+    ctx.fillRect(px(-4+i*4),py(legY+37),2,8);
+  }
+  // Boot stud
+  ctx.fillStyle='#555';
+  for(let s=0;s<4;s++){
+    ctx.fillRect(px(-10+s*6),py(legY+48),4,3);
+  }
+
+  ctx.restore();
+}
+
+function drawAimReticle(){
+  if(state!=='aiming') return;
+  const x=aimX, y=aimY;
+  const t=frame;
+
+  // Pulsing outer ring
+  const pulse=1+0.1*Math.sin(t*0.12);
+  const r=20*pulse;
+  ctx.strokeStyle='rgba(255,255,0,0.8)';
+  ctx.lineWidth=2;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.arc(px(x),py(y),r,0,Math.PI*2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Crosshair
+  ctx.strokeStyle='rgba(255,255,0,0.9)';
+  ctx.lineWidth=2;
+  const cs=14;
+  ctx.beginPath();
+  ctx.moveTo(px(x-cs),py(y)); ctx.lineTo(px(x-6),py(y));
+  ctx.moveTo(px(x+6),py(y));  ctx.lineTo(px(x+cs),py(y));
+  ctx.moveTo(px(x),py(y-cs)); ctx.lineTo(px(x),py(y-6));
+  ctx.moveTo(px(x),py(y+6));  ctx.lineTo(px(x),py(y+cs));
+  ctx.stroke();
+
+  // Center dot
+  ctx.fillStyle='#ff0';
+  ctx.fillRect(px(x-2),py(y-2),4,4);
+
+  // Charge indicator
+  if(isCharging){
+    chargeLevel=Math.min(chargeLevel+0.03,1);
+    const chargeR=r+10+chargeLevel*25;
+    ctx.strokeStyle=`rgba(255,${Math.floor(255-chargeLevel*255)},0,0.6)`;
+    ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.arc(px(x),py(y),chargeR,-Math.PI/2,-Math.PI/2+chargeLevel*Math.PI*2);
+    ctx.stroke();
+
+    // Power label
+    ctx.fillStyle='#fff';
+    ctx.font='bold 9px "Press Start 2P"';
+    ctx.textAlign='center';
+    ctx.fillText(`PWR:${Math.floor(chargeLevel*100)}%`,px(x),py(y+chargeR+14));
+  }
+}
+
+function drawPowerBar(){
+  if(state!=='aiming'&&state!=='kicking') return;
+  const bx=W-70, by=H-60, bw=50, bh=12;
+  ctx.fillStyle='rgba(0,0,0,0.6)';
+  ctx.fillRect(bx-4,by-16,bw+8,bh+24);
+  ctx.fillStyle='#333';
+  ctx.fillRect(bx,by,bw,bh);
+  const col=chargeLevel>0.7?'#f00':chargeLevel>0.4?'#ff0':'#0f0';
+  ctx.fillStyle=col;
+  ctx.fillRect(bx,by,bw*chargeLevel,bh);
+  ctx.strokeStyle='#fff';
+  ctx.lineWidth=1;
+  ctx.strokeRect(bx,by,bw,bh);
+  ctx.fillStyle='#fff';
+  ctx.font='6px "Press Start 2P"';
+  ctx.textAlign='left';
+  ctx.fillText('PWR',bx,by-4);
+}
+
+function drawArrows(){
+  if(state!=='aiming') return;
+  // Pixel art arrow hints
+  const arrowCol='rgba(255,255,255,0.3)';
+  const cx2=W*0.5, ay=H*0.82;
+  [[-1,0],[1,0],[0,-1]].forEach(([dx2,dy2])=>{
+    ctx.fillStyle=arrowCol;
+    const ax=cx2+dx2*40, ay2=ay+dy2*20;
+    ctx.font='14px "Press Start 2P"';
+    ctx.textAlign='center';
+    ctx.fillText(dx2<0?'◄':dx2>0?'►':'▲',ax,ay2);
+  });
+}
+
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life;
+    if(p.shape==='star'){
+      drawStar(p.x,p.y,p.r,p.color);
+    } else {
+      ctx.fillStyle=p.color;
+      ctx.fillRect(px(p.x-p.r/2),py(p.y-p.r/2),p.r,p.r);
+    }
+    ctx.globalAlpha=1;
+  });
+}
+
+function drawOutcomeFlash(){
+  const el=document.getElementById('outcome-text');
+  const combo2=document.getElementById('combo-text');
+  if(state==='result'){
+    const msgs={
+      goal:  {col:'#ffff00',shadow:'#ff8800'},
+      curve: {col:'#00ffff',shadow:'#0066ff'},
+      save:  {col:'#ff4444',shadow:'#880000'},
+      post:  {col:'#ffffff',shadow:'#666666'},
+      miss:  {col:'#ff6600',shadow:'#663300'}
+    };
+    const m=msgs[currentOutcome]||{col:'#fff',shadow:'#000'};
+    el.style.color=m.col;
+    el.style.textShadow=`0 0 20px ${m.col}, 0 0 40px ${m.shadow}, 3px 3px 0 ${m.shadow}`;
+    el.style.fontSize=currentOutcome==='goal'||currentOutcome==='curve'?'36px':'28px';
+  }
+}
+
+function showOutcome(text, o){
+  const el=document.getElementById('outcome-text');
+  const comb=document.getElementById('combo-text');
+  el.textContent=text;
+  el.style.opacity=text?'1':'0';
+
+  if((o==='goal'||o==='curve')&&combo>=2){
+    comb.textContent=`${combo}x COMBO!`;
+    comb.style.opacity='1';
+    setTimeout(()=>{ comb.style.opacity='0'; },1800);
+  } else {
+    comb.style.opacity='0';
+  }
+
+  drawOutcomeFlash();
+}
+
+function drawGameover(){
+  if(state!=='gameover') return;
+  ctx.fillStyle='rgba(0,0,0,0.75)';
+  ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  ctx.font='22px "Press Start 2P"';
+  ctx.textAlign='center';
+  ctx.fillStyle='#ff0';
+  ctx.shadowColor='#ff0';
+  ctx.shadowBlur=20;
+  ctx.fillText('FULL TIME!',W/2,H*0.35);
+  ctx.shadowBlur=0;
+
+  ctx.font='11px "Press Start 2P"';
+  ctx.fillStyle='#fff';
+  ctx.fillText(`GOALS: ${score} / ${totalShots} SHOTS`,W/2,H*0.46);
+  ctx.fillText(`BEST COMBO: x${maxCombo}`,W/2,H*0.54);
+
+  const rating=score>=4?'WORLD CLASS':score>=3?'GREAT PLAYER':score>=2?'DECENT SHOT':score>=1?'NEEDS PRACTICE':'MISSED THE NET';
+  ctx.fillStyle='#0ff';
+  ctx.font='9px "Press Start 2P"';
+  ctx.fillText(rating,W/2,H*0.63);
+
+  // Pixel trophy if 4+ goals
+  if(score>=4){
+    drawTrophy(W/2,H*0.76);
+  }
+
+  ctx.font='8px "Press Start 2P"';
+  ctx.fillStyle='rgba(255,255,255,0.6)';
+  const blink2=Math.floor(frame/20)%2===0;
+  if(blink2) ctx.fillText('CLICK OR SPACE TO PLAY AGAIN',W/2,H*0.90);
+  ctx.restore();
+}
+
+function drawTrophy(x,y){
+  ctx.fillStyle='#ffd700';
+  // Cup base
+  ctx.fillRect(px(x-20),py(y-4),40,10);
+  ctx.fillRect(px(x-10),py(y-16),20,14);
+  // Cup body
+  ctx.fillRect(px(x-24),py(y-40),48,26);
+  // Cup top
+  ctx.fillRect(px(x-18),py(y-48),36,10);
+  // Handles
+  ctx.fillRect(px(x-32),py(y-38),8,16);
+  ctx.fillRect(px(x+24),py(y-38),8,16);
+  // Star
+  drawStar(x,y-34,8,'#fff');
+}
+
+function drawVignette(){
+  const v=ctx.createRadialGradient(W/2,H/2,W*0.3,W/2,H/2,W*0.75);
+  v.addColorStop(0,'transparent');
+  v.addColorStop(1,'rgba(0,0,0,0.5)');
+  ctx.fillStyle=v;
+  ctx.fillRect(0,0,W,H);
+}
+
+function drawFlicker(){
+  if(Math.random()<0.004){
+    flickerFrames=3+Math.floor(Math.random()*3);
+  }
+  if(flickerFrames>0){
+    ctx.fillStyle='rgba(255,255,255,0.015)';
+    ctx.fillRect(0,0,W,H);
+    flickerFrames--;
+  }
+}
+
+function drawPixelGoalLine(){
+  // Goal line flash on goal
+  if(state==='result'&&(currentOutcome==='goal'||currentOutcome==='curve')){
+    const t=resultTimer;
+    if(t<30){
+      ctx.fillStyle=`rgba(255,255,0,${0.15*(1-t/30)*Math.sin(t*0.5)})`;
+      ctx.fillRect(px(W*0.305),py(H*0.27),px(W*0.695-W*0.305+8),py(H*0.23));
+    }
+  }
+  resultTimer++;
+}
+
+function drawChargingEffect(){
+  if(isCharging&&chargeLevel>0){
+    // Electric aura around player area
+    ctx.strokeStyle=`rgba(255,255,0,${chargeLevel*0.4})`;
+    ctx.lineWidth=1;
+    for(let i=0;i<3;i++){
+      ctx.setLineDash([2,3]);
+      ctx.beginPath();
+      ctx.arc(W/2, H*0.8, 40+i*20+Math.sin(frame*0.3+i)*5, 0, Math.PI*2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Screen tint
+    ctx.fillStyle=`rgba(255,200,0,${chargeLevel*0.04})`;
+    ctx.fillRect(0,0,W,H);
+  }
+}
+
+function drawArrowKeyAim(){
+  if(state==='aiming'){
+    const spd=3;
+    if(keys['ArrowLeft'])  aimX=Math.max(80, aimX-spd);
+    if(keys['ArrowRight']) aimX=Math.min(W-80, aimX+spd);
+    if(keys['ArrowUp'])    aimY=Math.max(80, aimY-spd);
+    if(keys['ArrowDown'])  aimY=Math.min(H*0.7, aimY+spd);
+  }
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────
+function update(){
+  frame++;
+
+  // Camera bob
+  if(state==='aiming'){
+    camBobTime+=0.05;
+    camBob=Math.sin(camBobTime)*3;
+  }
+
+  // Shake decay
+  if(shake.power>0){
+    shake.x=(Math.random()-0.5)*shake.power;
+    shake.y=(Math.random()-0.5)*shake.power;
+    shake.power*=0.85;
+    if(shake.power<0.2) shake.power=0;
+  } else {
+    shake.x=0; shake.y=0;
+  }
+
+  // GK update
+  if(gkAnim&&state==='kicking'){
+    gkAnim.t=Math.min(gkAnim.t+0.018,1);
+  }
+
+  drawArrowKeyAim();
+  updateParticles();
+}
+
+function render(){
+  ctx.save();
+  ctx.translate(px(shake.x), py(shake.y));
+
+  // Clear
+  ctx.fillStyle='#000';
+  ctx.fillRect(-10,-10,W+20,H+20);
+
+  drawSky();
+  drawCrowd();
+  drawPitch();
+  drawGoal();
+  drawGoalkeeper();
+  drawBall();
+  drawChargingEffect();
+  drawLegs();
+  drawAimReticle();
+  drawPowerBar();
+  drawArrows();
+  drawParticles();
+  drawPixelGoalLine();
+  drawVignette();
+  drawFlicker();
+
+  if(state==='gameover') drawGameover();
+
+  ctx.restore();
+}
+
+function loop(){
+  update();
+  render();
+  drawOutcomeFlash();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
