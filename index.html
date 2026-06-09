@@ -2,34 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>PIXEL KICK — Retro Arcade Soccer</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    background: #000;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    touch-action: none;
+  }
 
   body {
-    background: #000;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100vh;
-    overflow: hidden;
     font-family: 'Press Start 2P', monospace;
   }
 
+  /* Wrapper scales to fit viewport while keeping 4:3 aspect */
   #wrapper {
     position: relative;
     width: 640px;
     height: 480px;
+    /* Scale down on small screens */
+    transform-origin: top center;
   }
 
   #gameCanvas {
     display: block;
+    width: 640px;
+    height: 480px;
     image-rendering: pixelated;
+    image-rendering: crisp-edges;
     cursor: none;
+    touch-action: none;
   }
 
   /* CRT overlay */
@@ -49,7 +62,6 @@
       );
     border-radius: 4px;
   }
-
   #crt::after {
     content: '';
     position: absolute;
@@ -60,24 +72,14 @@
 
   #scanline {
     position: absolute;
-    top: -100%;
-    left: 0;
-    width: 100%;
-    height: 20%;
-    background: linear-gradient(to bottom,
-      transparent 0%,
-      rgba(255,255,255,0.03) 50%,
-      transparent 100%
-    );
+    top: -100%; left: 0;
+    width: 100%; height: 20%;
+    background: linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%);
     animation: scan 8s linear infinite;
     pointer-events: none;
     z-index: 11;
   }
-
-  @keyframes scan {
-    0%   { top: -20%; }
-    100% { top: 110%; }
-  }
+  @keyframes scan { 0% { top:-20%; } 100% { top:110%; } }
 
   #title-screen {
     position: absolute;
@@ -89,48 +91,36 @@
     align-items: center;
     justify-content: center;
     z-index: 20;
-    gap: 20px;
+    gap: 14px;
   }
-
   .title-glow {
     font-family: 'Press Start 2P', monospace;
-    font-size: 32px;
+    font-size: 28px;
     color: #fff;
-    text-shadow:
-      0 0 10px #0ff,
-      0 0 30px #0ff,
-      0 0 60px #0af,
-      4px 4px 0 #006;
+    text-shadow: 0 0 10px #0ff, 0 0 30px #0ff, 0 0 60px #0af, 4px 4px 0 #006;
     animation: titlePulse 1.5s ease-in-out infinite alternate;
-    letter-spacing: 4px;
+    letter-spacing: 3px;
   }
-
   .title-sub {
     font-family: 'VT323', monospace;
-    font-size: 22px;
+    font-size: 20px;
     color: #ff0;
     text-shadow: 2px 2px 0 #880, 0 0 15px #ff0;
     animation: blink 0.8s step-end infinite;
   }
-
   .title-info {
     font-family: 'VT323', monospace;
-    font-size: 16px;
+    font-size: 15px;
     color: #0f8;
     text-align: center;
-    line-height: 28px;
+    line-height: 26px;
     text-shadow: 0 0 8px #0f8;
   }
-
   @keyframes titlePulse {
     from { text-shadow: 0 0 10px #0ff, 0 0 30px #0ff, 4px 4px 0 #006; }
     to   { text-shadow: 0 0 20px #0ff, 0 0 50px #0af, 0 0 80px #08f, 4px 4px 0 #006; }
   }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0; }
-  }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
 
   #hud {
     position: absolute;
@@ -139,36 +129,32 @@
     pointer-events: none;
     z-index: 9;
   }
-
   .score-display {
     position: absolute;
     top: 10px; left: 50%;
     transform: translateX(-50%);
     font-family: 'Press Start 2P', monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: #fff;
     text-shadow: 0 0 8px #0ff, 2px 2px 0 #004;
     white-space: nowrap;
   }
-
   .shots-display {
     position: absolute;
-    top: 30px; left: 50%;
+    top: 28px; left: 50%;
     transform: translateX(-50%);
     font-family: 'VT323', monospace;
-    font-size: 18px;
+    font-size: 16px;
     color: #ff0;
     text-shadow: 0 0 6px #ff0;
     white-space: nowrap;
   }
-
   #outcome-text {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    top: 50%; left: 50%;
     transform: translate(-50%, -50%);
     font-family: 'Press Start 2P', monospace;
-    font-size: 28px;
+    font-size: 26px;
     color: #fff;
     text-align: center;
     pointer-events: none;
@@ -177,14 +163,12 @@
     transition: opacity 0.1s;
     white-space: nowrap;
   }
-
   #combo-text {
     position: absolute;
-    top: 38%;
-    left: 50%;
+    top: 38%; left: 50%;
     transform: translate(-50%, -50%);
     font-family: 'VT323', monospace;
-    font-size: 22px;
+    font-size: 20px;
     color: #ff0;
     text-align: center;
     pointer-events: none;
@@ -193,31 +177,86 @@
     text-shadow: 0 0 10px #ff0;
     white-space: nowrap;
   }
+
+  /* ── Mobile shoot button ─────────────────────────────── */
+  #shoot-btn {
+    display: none; /* shown only on touch devices via JS */
+    position: absolute;
+    bottom: -90px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 70px;
+    background: radial-gradient(ellipse at 40% 35%, #ff6600, #992200);
+    border: 3px solid #ff9944;
+    border-radius: 12px;
+    z-index: 30;
+    touch-action: none;
+    user-select: none;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #550000, 0 0 20px rgba(255,100,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #shoot-btn .btn-icon  { font-size: 24px; line-height: 1; }
+  #shoot-btn .btn-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    color: #ffe;
+    text-shadow: 1px 1px 0 #000;
+    letter-spacing: 1px;
+  }
+  #shoot-btn.pressed {
+    transform: translateX(-50%) translateY(3px);
+    box-shadow: 0 1px 0 #550000, 0 0 30px rgba(255,180,0,0.6);
+    background: radial-gradient(ellipse at 40% 35%, #ffaa00, #cc4400);
+  }
+  #shoot-btn.hidden { opacity: 0; pointer-events: none; }
+
+  /* ── Outer page wrapper for scaling ──────────────────── */
+  #page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
 </style>
 </head>
 <body>
-<div id="wrapper">
-  <canvas id="gameCanvas" width="640" height="480"></canvas>
-  <div id="crt"></div>
-  <div id="scanline"></div>
-  <div id="hud">
-    <div class="score-display" id="scoreDisplay">GOALS: 0 | SHOTS: 0</div>
-    <div class="shots-display" id="shotsDisplay">ARROWS/MOUSE → AIM  |  HOLD SPACE → CHARGE  |  RELEASE → SHOOT</div>
-  </div>
-  <div id="outcome-text"></div>
-  <div id="combo-text"></div>
-
-  <div id="title-screen">
-    <div class="title-glow">PIXEL KICK</div>
-    <div style="font-family:'VT323',monospace;font-size:18px;color:#888;text-shadow:1px 1px 0 #333;">RETRO ARCADE SOCCER ©1987</div>
-    <div class="title-sub" style="margin-top:10px;">— INSERT COIN —</div>
-    <div class="title-info">
-      MOUSE / ARROWS → AIM<br>
-      HOLD SPACE → CHARGE POWER<br>
-      RELEASE SPACE → SHOOT<br>
-      CLICK → SKIP / RESTART
+<div id="page">
+  <div id="wrapper">
+    <canvas id="gameCanvas" width="640" height="480"></canvas>
+    <div id="crt"></div>
+    <div id="scanline"></div>
+    <div id="hud">
+      <div class="score-display" id="scoreDisplay">GOALS: 0 | SHOTS: 0</div>
+      <div class="shots-display"  id="shotsDisplay"></div>
     </div>
-    <div style="margin-top:8px;font-family:'VT323',monospace;font-size:14px;color:#555;">HI-SCORE: 9999</div>
+    <div id="outcome-text"></div>
+    <div id="combo-text"></div>
+
+    <div id="title-screen">
+      <div class="title-glow">PIXEL KICK</div>
+      <div style="font-family:'VT323',monospace;font-size:16px;color:#888;text-shadow:1px 1px 0 #333;">RETRO ARCADE SOCCER ©1987</div>
+      <div class="title-sub" style="margin-top:6px;">— INSERT COIN —</div>
+      <div class="title-info" id="title-controls">
+        DRAG / ARROWS → AIM<br>
+        HOLD SPACE → CHARGE<br>
+        RELEASE → SHOOT
+      </div>
+      <div style="margin-top:6px;font-family:'VT323',monospace;font-size:13px;color:#555;">HI-SCORE: 9999</div>
+    </div>
+
+    <!-- Mobile shoot button lives inside wrapper so it scales with it -->
+    <div id="shoot-btn" class="hidden">
+      <span class="btn-icon">⚽</span>
+      <span class="btn-label">SHOOT</span>
+    </div>
   </div>
 </div>
 
@@ -225,6 +264,120 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const W = 640, H = 480;
+
+// ─── RESPONSIVE SCALING ───────────────────────────────────
+const wrapper   = document.getElementById('wrapper');
+const shootBtn  = document.getElementById('shoot-btn');
+let   canvasScale = 1;
+
+function resizeGame(){
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+  // Leave room below canvas for shoot button on mobile
+  const btnRoom = isMobile ? 100 : 0;
+  const scaleX  = vw / 640;
+  const scaleY  = (vh - btnRoom) / 480;
+  canvasScale   = Math.min(scaleX, scaleY, 1.5); // allow slight upscale on tablets
+
+  wrapper.style.transform = `scale(${canvasScale})`;
+
+  // Centre the scaled wrapper
+  const scaledW = 640 * canvasScale;
+  const scaledH = 480 * canvasScale;
+  wrapper.style.marginTop  = Math.max(0, (vh - btnRoom - scaledH) / 2 / canvasScale) + 'px';
+
+  // Show/position shoot button on touch devices
+  if(isMobile){
+    shootBtn.classList.remove('hidden');
+    shootBtn.style.display = 'flex';
+    // Position below canvas (inside wrapper, so it scales with it)
+    shootBtn.style.bottom  = `-${Math.round(85 / canvasScale)}px`;
+    shootBtn.style.width   = `${Math.round(130 / canvasScale)}px`;
+    shootBtn.style.height  = `${Math.round(68 / canvasScale)}px`;
+
+    // Update title screen controls text for touch
+    document.getElementById('title-controls').innerHTML =
+      'DRAG → AIM<br>HOLD SHOOT BTN → CHARGE<br>RELEASE → SHOOT<br>TAP → START / NEXT';
+  }
+}
+
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ─── TOUCH → CANVAS COORDINATE MAPPING ───────────────────
+function touchToCanvas(touch){
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - rect.left) / canvasScale,
+    y: (touch.clientY - rect.top)  / canvasScale
+  };
+}
+
+// ─── TOUCH INPUT ──────────────────────────────────────────
+let touchAimId   = null;   // identifier of the aim finger
+let shootBtnDown = false;
+
+// Canvas touch — drag to aim
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  touchAimId = t.identifier;
+  const pos  = touchToCanvas(t);
+  aimX = Math.max(0, Math.min(W, pos.x));
+  aimY = Math.max(0, Math.min(H, pos.y));
+
+  if(state === 'title')    { startGame(); return; }
+  if(state === 'result')   { nextShot();  return; }
+  if(state === 'gameover') { initGame();  return; }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    if(t.identifier === touchAimId){
+      const pos = touchToCanvas(t);
+      aimX = Math.max(0, Math.min(W, pos.x));
+      aimY = Math.max(0, Math.min(H, pos.y));
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchAimId = null;
+}, { passive: false });
+
+// Shoot button — touchstart = charge, touchend = shoot
+shootBtn.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if(state === 'title')    { startGame(); return; }
+  if(state === 'result')   { nextShot();  return; }
+  if(state === 'gameover') { initGame();  return; }
+  if(state === 'aiming' && !isCharging){
+    isCharging   = true;
+    shootBtnDown = true;
+    shootBtn.classList.add('pressed');
+  }
+}, { passive: false });
+
+shootBtn.addEventListener('touchend', e => {
+  e.preventDefault();
+  if(state === 'aiming' && isCharging && shootBtnDown){
+    shoot();
+    isCharging   = false;
+    shootBtnDown = false;
+    shootBtn.classList.remove('pressed');
+  }
+}, { passive: false });
+
+// Safety: cancel if touch leaves button
+shootBtn.addEventListener('touchcancel', e => {
+  shootBtnDown = false;
+  isCharging   = false;
+  shootBtn.classList.remove('pressed');
+});
 
 // ─── STATE ───────────────────────────────────────────────
 let state = 'title';
@@ -544,6 +697,13 @@ function nextShot(){
   gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
   chargeLevel=0;
   isCharging=false;
+  shootBtnDown=false;
+  shootBtn.classList.remove('pressed');
+  // Reset button label
+  const btnLabel = shootBtn.querySelector('.btn-label');
+  const btnIcon  = shootBtn.querySelector('.btn-icon');
+  if(btnLabel) btnLabel.textContent = 'SHOOT';
+  if(btnIcon)  btnIcon.textContent  = '⚽';
   showOutcome('', '', '');
 
   if(shotsLeft<=0){
@@ -796,10 +956,12 @@ function processResult(o){
 
 function updateHUD(){
   document.getElementById('scoreDisplay').textContent=`GOALS: ${score} | SHOTS: ${totalShots}`;
+  const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if(state==='aiming'){
-    document.getElementById('shotsDisplay').textContent=`⚽ x${shotsLeft}  |  AIM: MOUSE/ARROWS  SHOOT: HOLD+RELEASE SPACE`;
-  } else if(state==='kicking'){
-    document.getElementById('shotsDisplay').textContent='';
+    const hint = isMobile
+      ? `⚽ x${shotsLeft}  DRAG TO AIM · HOLD BTN TO CHARGE`
+      : `⚽ x${shotsLeft}  MOUSE/ARROWS=AIM  SPACE=SHOOT`;
+    document.getElementById('shotsDisplay').textContent = hint;
   } else {
     document.getElementById('shotsDisplay').textContent='';
   }
@@ -1925,8 +2087,10 @@ function drawPowerBar(){
 }
 
 function drawArrows(){
+  // Only show arrow hints on non-touch devices
+  const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if(isMobile) return;
   if(state!=='aiming') return;
-  // Pixel art arrow hints
   const arrowCol='rgba(255,255,255,0.3)';
   const cx2=W*0.5, ay=H*0.82;
   [[-1,0],[1,0],[0,-1]].forEach(([dx2,dy2])=>{
@@ -1936,6 +2100,22 @@ function drawArrows(){
     ctx.textAlign='center';
     ctx.fillText(dx2<0?'◄':dx2>0?'►':'▲',ax,ay2);
   });
+}
+
+// Show/hide the mobile shoot button based on game state
+function syncShootBtn(){
+  const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if(!isMobile) return;
+  if(state === 'aiming'){
+    shootBtn.classList.remove('hidden');
+  } else if(state === 'result' || state === 'gameover'){
+    // Keep visible so player can tap to advance
+    shootBtn.classList.remove('hidden');
+    shootBtn.querySelector('.btn-label').textContent = state === 'gameover' ? 'RETRY' : 'NEXT';
+    shootBtn.querySelector('.btn-icon').textContent  = state === 'gameover' ? '🔄' : '▶';
+  } else if(state === 'kicking'){
+    shootBtn.classList.add('hidden');
+  }
 }
 
 function drawParticles(){
@@ -2138,6 +2318,7 @@ function update(){
 
   drawArrowKeyAim();
   updateParticles();
+  syncShootBtn();
 
   // ── Commentator timer tick ────────────────────────────
   if(commentatorTimer > 0) commentatorTimer--;
