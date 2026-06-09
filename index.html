@@ -253,12 +253,217 @@ let isCharging = false;
 const MAX_SHOTS = 5;
 let shotsLeft = MAX_SHOTS;
 
+// ── Feature: Ball Trail ───────────────────────────────────
+let ballTrail = [];            // [{x,y,r,alpha}]
+const TRAIL_LEN = 10;
+
+// ── Feature: Freeze Frame ─────────────────────────────────
+let freezeFrames = 0;
+
+// ── Feature: Divot / Scorch Mark ─────────────────────────
+let divotMark = null;
+
+// ── Feature: Net Bulge ────────────────────────────────────
+let netBulgeTimer = 0;
+
+// ── Feature: Commentator ─────────────────────────────────
+let commentatorLine = '';
+let commentatorTimer = 0;
+
+// ── Feature: Sound (Web Audio API) ───────────────────────
+let audioCtx = null;
+
+// ── Feature: Wind ─────────────────────────────────────────
+let windStrength = 0;
+let windAngle    = 0;
+
+// ── Feature: Crowd Reaction Mode ──────────────────────────
+let crowdMode    = 'idle';
+let crowdModeTimer = 0;
+
 // ─── INIT ─────────────────────────────────────────────────
 for(let i=0;i<80;i++) stars.push({x:Math.random()*W,y:Math.random()*(H*0.35),b:Math.random()});
 for(let i=0;i<60;i++) crowdBaseNoise.push({x:Math.random()*W,y:H*0.18+Math.random()*H*0.14,c:randCrowdColor(),phase:Math.random()*Math.PI*2});
 
 // GK starts idle immediately — visible from the very first frame
 gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
+
+// ─── AUDIO ENGINE ─────────────────────────────────────────
+function initAudio(){
+  if(audioCtx) return audioCtx;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playSound(type){
+  try {
+    const ac = initAudio();
+    if(ac.state === 'suspended') ac.resume();
+    const now = ac.currentTime;
+
+    if(type === 'kick'){
+      // Deep boot thud: low sine burst + noise punch
+      const osc  = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(90, now);
+      osc.frequency.exponentialRampToValueAtTime(30, now + 0.12);
+      gain.gain.setValueAtTime(0.9, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.start(now); osc.stop(now + 0.18);
+      // White noise click layer
+      const buf  = ac.createBuffer(1, ac.sampleRate * 0.06, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*0.4;
+      const src2  = ac.createBufferSource();
+      const filt  = ac.createBiquadFilter();
+      const ng    = ac.createGain();
+      src2.buffer = buf;
+      filt.type = 'lowpass'; filt.frequency.value = 800;
+      src2.connect(filt); filt.connect(ng); ng.connect(ac.destination);
+      ng.gain.setValueAtTime(0.7, now);
+      ng.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      src2.start(now);
+    }
+
+    else if(type === 'whoosh'){
+      // Ball flight whoosh — filtered noise sweep
+      const buf  = ac.createBuffer(1, ac.sampleRate * 0.5, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1);
+      const src  = ac.createBufferSource();
+      const filt = ac.createBiquadFilter();
+      const gain = ac.createGain();
+      src.buffer = buf;
+      filt.type  = 'bandpass';
+      filt.frequency.setValueAtTime(3000, now);
+      filt.frequency.exponentialRampToValueAtTime(800, now + 0.45);
+      filt.Q.value = 4;
+      gain.gain.setValueAtTime(0.0, now);
+      gain.gain.linearRampToValueAtTime(0.3, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      src.connect(filt); filt.connect(gain); gain.connect(ac.destination);
+      src.start(now);
+    }
+
+    else if(type === 'goal'){
+      // Crowd roar — layered noise swell
+      for(let layer=0;layer<3;layer++){
+        const buf  = ac.createBuffer(1, ac.sampleRate * 1.8, ac.sampleRate);
+        const data = buf.getChannelData(0);
+        for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1);
+        const src  = ac.createBufferSource();
+        const filt = ac.createBiquadFilter();
+        const gain = ac.createGain();
+        src.buffer = buf;
+        filt.type  = 'lowpass';
+        filt.frequency.value = 300 + layer*200;
+        gain.gain.setValueAtTime(0.0, now);
+        gain.gain.linearRampToValueAtTime(0.18-layer*0.04, now+0.15);
+        gain.gain.linearRampToValueAtTime(0.12-layer*0.02, now+1.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, now+1.8);
+        src.connect(filt); filt.connect(gain); gain.connect(ac.destination);
+        src.start(now + layer*0.04);
+      }
+      // Net swish — short high noise burst
+      const nbuf  = ac.createBuffer(1, ac.sampleRate * 0.12, ac.sampleRate);
+      const ndata = nbuf.getChannelData(0);
+      for(let i=0;i<ndata.length;i++) ndata[i]=(Math.random()*2-1);
+      const nsrc  = ac.createBufferSource();
+      const nfilt = ac.createBiquadFilter();
+      const ngain = ac.createGain();
+      nsrc.buffer = nbuf;
+      nfilt.type  = 'highpass'; nfilt.frequency.value = 4000;
+      ngain.gain.setValueAtTime(0.4, now+0.12);
+      ngain.gain.exponentialRampToValueAtTime(0.001, now+0.24);
+      nsrc.connect(nfilt); nfilt.connect(ngain); ngain.connect(ac.destination);
+      nsrc.start(now + 0.12);
+    }
+
+    else if(type === 'save'){
+      // Glove slap — sharp mid transient
+      const osc  = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.08);
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.start(now); osc.stop(now + 0.1);
+      // Crowd groan — low filtered noise
+      const buf  = ac.createBuffer(1, ac.sampleRate * 0.9, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1);
+      const src  = ac.createBufferSource();
+      const filt = ac.createBiquadFilter();
+      const ng   = ac.createGain();
+      src.buffer = buf;
+      filt.type  = 'lowpass'; filt.frequency.value = 180;
+      ng.gain.setValueAtTime(0.0, now+0.05);
+      ng.gain.linearRampToValueAtTime(0.10, now+0.2);
+      ng.gain.exponentialRampToValueAtTime(0.001, now+0.9);
+      src.connect(filt); filt.connect(ng); ng.connect(ac.destination);
+      src.start(now+0.05);
+    }
+
+    else if(type === 'post'){
+      // Metallic clang — detuned pair of oscillators with decay
+      [200, 202, 308, 312].forEach((freq, i) => {
+        const osc  = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.connect(gain); gain.connect(ac.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.22, now + i*0.005);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        osc.start(now + i*0.005); osc.stop(now + 0.65);
+      });
+    }
+
+    else if(type === 'miss'){
+      // Deflated tuba-ish wah-wah
+      [130, 123, 116].forEach((freq, i) => {
+        const osc  = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.connect(gain); gain.connect(ac.destination);
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.18, now + i*0.14);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i*0.14 + 0.13);
+        osc.start(now + i*0.14); osc.stop(now + i*0.14 + 0.14);
+      });
+    }
+
+    else if(type === 'whistle'){
+      // Referee short pip
+      const osc  = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(2400, now);
+      osc.frequency.setValueAtTime(2600, now+0.04);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.start(now); osc.stop(now + 0.12);
+    }
+
+    else if(type === 'slowmo'){
+      // Deep cinematic whomp on slow-mo trigger
+      const osc  = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(60, now);
+      osc.frequency.exponentialRampToValueAtTime(25, now + 0.4);
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc.start(now); osc.stop(now + 0.4);
+    }
+
+  } catch(e){ /* audio blocked — ignore silently */ }
+}
 
 function randCrowdColor(){
   const cols=['#ff3333','#3366ff','#ffff00','#ffffff','#33cc33','#ff9900','#cc33ff','#00ffff'];
@@ -314,6 +519,13 @@ function startGame(){ document.getElementById('title-screen').style.display='non
 function initGame(){
   score=0; totalShots=0; combo=0; maxCombo=0; shotsLeft=MAX_SHOTS;
   particles=[];
+  ballTrail=[];
+  divotMark=null;
+  netBulgeTimer=0;
+  commentatorLine=''; commentatorTimer=0;
+  freezeFrames=0;
+  windStrength=0; windAngle=0;
+  crowdMode='idle'; crowdModeTimer=0;
   updateHUD();
   state='aiming';
   chargeLevel=0;
@@ -323,8 +535,12 @@ function initGame(){
 }
 
 function nextShot(){
-  // Reset animation state but keep GK visible in idle
   ballAnim=null; kickAnim=null;
+  ballTrail=[];
+  freezeFrames=0;
+  divotMark=null;
+  netBulgeTimer=0;
+  commentatorLine=''; commentatorTimer=0;
   gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
   chargeLevel=0;
   isCharging=false;
@@ -459,28 +675,85 @@ function shoot(){
   currentOutcome = outcome;
   lastShotZone   = zone;
   kickAnim = { t:0, phase:'windup' };
+
+  // ── Ball speed driven purely by chargeLevel ───────────────
+  // POOR(0–30%) = slow floaty dur 70  BAD(75–100%) = wild dur 62
+  // GOOD(30–55%) = medium dur 48      PERFECT(55–75%) = fast dur 28
+  const baseDur = zone.label === 'PERFECT' ? 28
+                : zone.label === 'GOOD'    ? 48
+                : zone.label === 'POOR'    ? 70
+                :                           62; // BAD — skied/wild
+  // Miss shots always travel full distance to edge — add a few frames
+  const dur = outcome === 'miss' ? baseDur + 14 : baseDur;
+
   ballAnim = {
     sx:W/2, sy:H*0.68, tx:targetX, ty:targetY,
-    t:0, dur: outcome === 'miss' ? 55 : 48,
+    t:0, dur,
     power, outcome, curveDir, spin:0
   };
   resultTimer = 0;
+
+  // ── Divot mark ────────────────────────────────────────────
+  divotMark = { x: W/2 + (Math.random()-0.5)*8, y: H*0.72 };
+
+  // ── Wind: new random value each shot ─────────────────────
+  windStrength = (Math.random()*2 - 1) * 0.8;
+
+  // ── Sound: kick thud + whoosh ─────────────────────────────
+  playSound('kick');
+  setTimeout(() => playSound('whoosh'), 80);
+  playSound('whistle');
+
+  // ── Commentator pre-shot line (zone-aware) ───────────────
+  const preLines = {
+    POOR:    ['A weak effort...','Not much behind that one.','Lacking conviction!'],
+    GOOD:    ['He steps up...','A measured approach.','Decent strike incoming!'],
+    PERFECT: ['WHAT A HIT!','Absolutely thundered!','Pure technique!'],
+    BAD:     ["Oh no, he's slipped!",'Terrible contact!',"That's gone badly wrong!"]
+  };
+  const zonePre = preLines[zone.label] || ['He shoots...'];
+  setCommentator(zonePre[Math.floor(Math.random()*zonePre.length)], 90);
+}
+
+// ─── COMMENTATOR ──────────────────────────────────────────
+function setCommentator(line, duration=110){
+  commentatorLine  = line;
+  commentatorTimer = duration;
 }
 
 function resolveOutcome(o){
-  const msgs = {
-    goal:  ['⚽ GOAL!!','NETS BULGING!','WORLD CLASS!','SCREAMER!!'],
-    save:  ['SAVED!','KEEPER STOPS IT!','GREAT SAVE!','DENIED!!'],
-    post:  ['POST!!','OFF THE WOODWORK!','SO CLOSE!!','RATTLES THE POST!'],
-    miss:  ['MISSED!','OVER THE BAR!','WIDE LEFT!','SKIED IT!'],
-    curve: ['CURVED IN!!','WHAT A STRIKE!','ROBERTO CARLOS!','BANANA SHOT!!']
+  // Rich outcome lines — also sets a detailed commentator follow-up
+  const data = {
+    goal: {
+      big:  ['GOAAAAAL!!', "IT'S IN THE NET!!", 'WHAT A FINISH!!', 'SCREAMER!!'],
+      comm: ['Keeper had no chance!', 'Right in the bottom corner!', 'The crowd goes absolutely wild!', 'Unstoppable strike!']
+    },
+    curve: {
+      big:  ['CURVED IN!!', 'BANANA SHOT!!', 'ROBERTO CARLOS!!', 'WHAT A STRIKE!!'],
+      comm: ['Incredible bend on that!', 'Defied all physics!', "The keeper was watching it all the way - helpless!", 'Pure magic from the spot!']
+    },
+    save: {
+      big:  ['SAVED!!', 'KEEPER STOPS IT!', 'GREAT SAVE!!', 'DENIED!!'],
+      comm: ['Brilliant dive to his right!', 'He read it perfectly!', 'What a stop — gloves like magnets!', 'The keeper wins this battle!']
+    },
+    post: {
+      big:  ['POST!!', 'OFF THE WOODWORK!', 'SO CLOSE!!', 'RATTLES THE FRAME!'],
+      comm: ['Inches away from glory...', "The post is his saviour!", 'That must have stung — centimetres wide!', 'Out of luck today!']
+    },
+    miss: {
+      big:  ['MISSED!!', 'OVER THE BAR!', 'WIDE!!', 'SKIED IT!!'],
+      comm: ['Row Z! No doubt about it.', 'Nowhere near the target.', 'The pressure got to him!', 'That\'s going to hurt...']
+    }
   };
-  const list = msgs[o]||['...'];
-  return list[Math.floor(Math.random()*list.length)];
+  const d    = data[o] || data.miss;
+  const idx  = Math.floor(Math.random() * d.big.length);
+  // Fire the follow-up commentator line slightly delayed
+  setTimeout(()=> setCommentator(d.comm[idx % d.comm.length], 140), 400);
+  return d.big[idx];
 }
 
 function processResult(o){
-  // Update score & combo
+
   if(o==='goal'||o==='curve'){
     score++;
     combo++;
@@ -488,30 +761,37 @@ function processResult(o){
     crowdCheerLevel=1;
     spawnGoalParticles();
     triggerShake(8,18);
+    netBulgeTimer = 1;
+    crowdMode = 'goal';  crowdModeTimer = 180;
+    playSound('goal');
   } else if(o==='post'){
     triggerShake(5,10);
+    freezeFrames = 5;
     combo=0;
+    crowdMode = 'post';  crowdModeTimer = 90;
+    playSound('post');
   } else if(o==='save'){
     triggerShake(3,8);
+    freezeFrames = 4;
     combo=0;
+    crowdMode = 'save';  crowdModeTimer = 120;
+    playSound('save');
   } else {
     combo=0;
+    crowdMode = 'miss';  crowdModeTimer = 100;
+    playSound('miss');
   }
 
   state='result';
   resultTimer=0;
   updateHUD();
 
-  // Build outcome message with zone sub-label
   const zoneLabel = lastShotZone ? lastShotZone.label : '';
   const msg = resolveOutcome(o);
   showOutcome(msg, o, zoneLabel);
 
-  // Auto-advance after delay
   const delay = shotsLeft<=0 ? 2500 : 2000;
-  setTimeout(()=>{
-    if(state==='result') nextShot();
-  }, delay);
+  setTimeout(()=>{ if(state==='result') nextShot(); }, delay);
 }
 
 function updateHUD(){
@@ -651,27 +931,75 @@ function drawSky(){
 }
 
 function drawCrowd(){
-  // Stands background
   const standsGrad=ctx.createLinearGradient(0,H*0.18,0,H*0.38);
   standsGrad.addColorStop(0,'#111122');
   standsGrad.addColorStop(1,'#0a0a14');
   ctx.fillStyle=standsGrad;
   ctx.fillRect(0,py(H*0.18),W,py(H*0.20));
 
-  // Crowd rows – tiered seats
   const rowCount=4;
   for(let row=0;row<rowCount;row++){
     const ry=H*0.20+row*(H*0.045);
     for(let col=0;col<32;col++){
-      const cx2=col*(W/32)+W/64;
-      const phase=crowdBaseNoise[(row*8+col)%crowdBaseNoise.length].phase;
-      const cheer=(Math.sin(frame*0.05+phase)*0.5+0.5)*crowdCheerLevel;
-      const bob=(state==='result'&&currentOutcome==='goal')||celebrationTimer>0?Math.sin(frame*0.3+col*0.5)*4*cheer:0;
+      const cx2   = col*(W/32)+W/64;
+      const noise = crowdBaseNoise[(row*8+col)%crowdBaseNoise.length];
+      const phase = noise.phase;
+      const modeT = Math.max(0, crowdModeTimer/180);
+
+      let bob = 0;
+      let headCol = `hsl(${(col*37+row*77)%360},60%,55%)`;
+      let bodyCol = noise.c;
+
+      if(crowdMode === 'goal'){
+        // Standing ovation wave — ripple left to right
+        const wave  = Math.sin(frame*0.28 - col*0.22 + row*0.5) * 0.5 + 0.5;
+        bob = -wave * 12 * modeT;
+        headCol = `hsl(${(col*37+row*77+frame*2)%360},80%,65%)`; // colour shift
+        // Scarves — horizontal bar above head
+        if(wave > 0.5){
+          ctx.fillStyle=`rgba(255,220,0,${modeT*0.8})`;
+          ctx.fillRect(px(cx2-6), py(ry+bob-12), 12, 3);
+        }
+      } else if(crowdMode === 'save'){
+        // Opposition side erupts (right half), home side slumps (left half)
+        if(col > 16){
+          const wave = Math.sin(frame*0.25+col*0.3)*0.5+0.5;
+          bob = -wave*8*modeT;
+          headCol=`hsl(220,80%,65%)`;
+        } else {
+          bob = Math.abs(Math.sin(frame*0.12+col*0.2))*3*modeT; // slump down
+          headCol=`hsl(0,60%,40%)`;
+          // Hands on head pixel
+          ctx.fillStyle=`rgba(255,200,150,${modeT*0.5})`;
+          ctx.fillRect(px(cx2-5),py(ry+bob-9),4,3);
+          ctx.fillRect(px(cx2+1),py(ry+bob-9),4,3);
+        }
+      } else if(crowdMode === 'miss'){
+        // Groaning ripple — everyone leans and bows
+        const wave = Math.sin(frame*0.10 + col*0.18)*0.5+0.5;
+        bob = wave * 5 * modeT;
+        headCol = `hsl(${(col*37+row*77)%360},30%,40%)`; // desaturate
+        // Hands-on-head pixel dot
+        if(wave > 0.6){
+          ctx.fillStyle=`rgba(200,150,120,${modeT*0.6})`;
+          ctx.fillRect(px(cx2-3),py(ry+bob-9),6,2);
+        }
+      } else if(crowdMode === 'post'){
+        // Collective "OHHH" — sharp jump then sag, spreading ripple
+        const wave = Math.sin(frame*0.35 - col*0.15)*0.5+0.5;
+        bob = -wave*9*modeT;
+        headCol=`hsl(${(col*37+row*77)%360},60%,65%)`;
+      } else {
+        // Idle: gentle sway
+        const cheer=(Math.sin(frame*0.05+phase)*0.5+0.5)*crowdCheerLevel;
+        bob=(Math.sin(frame*0.3+col*0.5)*4*cheer) * 0.6;
+      }
+
       // Head
-      ctx.fillStyle=`hsl(${(col*37+row*77)%360},60%,55%)`;
+      ctx.fillStyle=headCol;
       ctx.fillRect(px(cx2-4),py(ry+bob-6),8,8);
       // Body
-      ctx.fillStyle=crowdBaseNoise[(col+row*10)%crowdBaseNoise.length].c;
+      ctx.fillStyle=bodyCol;
       ctx.fillRect(px(cx2-5),py(ry+bob+2),10,6);
     }
   }
@@ -684,19 +1012,17 @@ function drawCrowd(){
     ctx.globalAlpha=1;
   });
 
-  // Stadium lights (4 towers)
+  // Stadium lights
   const towers=[W*0.04,W*0.25,W*0.75,W*0.96];
   towers.forEach(tx2=>{
     ctx.fillStyle='#1a1a2e';
     ctx.fillRect(px(tx2-4),py(H*0.12),8,py(H*0.1));
-    // Light beam
     const lf=0.7+0.3*Math.sin(frame*0.03+tx2);
     const grad2=ctx.createRadialGradient(tx2,H*0.14,0,tx2,H*0.14,W*0.25);
     grad2.addColorStop(0,`rgba(255,255,220,${0.15*lf})`);
     grad2.addColorStop(1,'transparent');
     ctx.fillStyle=grad2;
     ctx.fillRect(0,py(H*0.12),W,py(H*0.2));
-    // Light head
     ctx.fillStyle=`rgba(255,255,180,${0.8*lf})`;
     ctx.fillRect(px(tx2-6),py(H*0.115),12,4);
   });
@@ -748,44 +1074,104 @@ function drawPitch(){
     ctx.fillStyle='#f00';
     ctx.fillRect(px(cx2),py(H*0.50-15),8,6);
   });
+
+  // ── Divot / scorch mark at kick point ─────────────────
+  if(divotMark){
+    // Dark grass scar
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    ctx.beginPath();
+    ctx.ellipse(px(divotMark.x), py(divotMark.y), 16, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Dirt colour inside
+    ctx.fillStyle = 'rgba(100,60,20,0.30)';
+    ctx.beginPath();
+    ctx.ellipse(px(divotMark.x), py(divotMark.y), 10, 4, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Turf flick pixels
+    ctx.fillStyle = 'rgba(0,120,0,0.5)';
+    for(let i=0;i<6;i++){
+      const a  = (i/6)*Math.PI*2;
+      const d  = 14 + Math.sin(i*1.3)*4;
+      ctx.fillRect(
+        px(divotMark.x + Math.cos(a)*d - 1),
+        py(divotMark.y + Math.sin(a)*d*0.4 - 1),
+        2, 2
+      );
+    }
+  }
 }
 
 function drawGoal(){
-  // Posts
-  const postW=8;
-  const lp=W*0.305, rp=W*0.695;
-  const topY=H*0.27, botY=H*0.50;
-  const postCol='#eeeeee';
-  const shadowCol='rgba(0,0,0,0.35)';
+  const postW = 8;
+  const lp = W*0.305, rp = W*0.695;
+  const topY = H*0.27, botY = H*0.50;
+  const postCol   = '#eeeeee';
+  const shadowCol = 'rgba(0,0,0,0.35)';
 
-  // Back net (pixel pattern)
-  ctx.strokeStyle='rgba(200,200,200,0.18)';
-  ctx.lineWidth=1;
-  for(let nx=lp+postW;nx<rp;nx+=12){
-    ctx.beginPath(); ctx.moveTo(px(nx),py(topY)); ctx.lineTo(px(nx),py(botY)); ctx.stroke();
+  // ── Net — static or bulging ───────────────────────────
+  // Advance net bulge timer
+  if(netBulgeTimer > 0) netBulgeTimer += 0.08;
+  if(netBulgeTimer > Math.PI) netBulgeTimer = 0;
+
+  const bulgeAmt = netBulgeTimer > 0
+    ? Math.sin(netBulgeTimer) * 14   // max 14px forward bulge
+    : 0;
+
+  ctx.strokeStyle = `rgba(200,200,200,${netBulgeTimer>0 ? 0.45 : 0.18})`;
+  ctx.lineWidth = 1;
+
+  // Vertical net lines
+  for(let nx2 = lp+postW; nx2 < rp; nx2 += 12){
+    const progress = (nx2 - (lp+postW)) / (rp - (lp+postW)); // 0→1 across width
+    const localBulge = bulgeAmt * Math.sin(progress * Math.PI); // bell curve across width
+    ctx.beginPath();
+    for(let ny2 = topY; ny2 <= botY; ny2 += 10){
+      const rowProg   = (ny2 - topY) / (botY - topY);
+      const depthBulge = localBulge * rowProg;  // bulge grows toward bottom
+      if(ny2 === topY) ctx.moveTo(px(nx2), py(ny2));
+      else ctx.lineTo(px(nx2 + depthBulge), py(ny2));
+    }
+    ctx.stroke();
   }
-  for(let ny=topY;ny<botY;ny+=10){
-    ctx.beginPath(); ctx.moveTo(px(lp+postW),py(ny)); ctx.lineTo(px(rp),py(ny)); ctx.stroke();
+
+  // Horizontal net lines
+  for(let ny2 = topY; ny2 < botY; ny2 += 10){
+    const rowProg = (ny2 - topY) / (botY - topY);
+    ctx.beginPath();
+    for(let nx2 = lp+postW; nx2 <= rp; nx2 += 12){
+      const progress    = (nx2 - (lp+postW)) / (rp - (lp+postW));
+      const localBulge  = bulgeAmt * Math.sin(progress * Math.PI);
+      const depthBulge  = localBulge * rowProg;
+      if(nx2 === lp+postW) ctx.moveTo(px(nx2), py(ny2));
+      else ctx.lineTo(px(nx2 + depthBulge), py(ny2));
+    }
+    ctx.stroke();
   }
 
-  // Crossbar shadow
-  drawPixelRect(lp, topY+postW, rp-lp, 4, shadowCol);
-  // Left post shadow
-  drawPixelRect(lp+postW, topY, 4, botY-topY, shadowCol);
-  // Right post shadow
-  drawPixelRect(rp+postW, topY, 4, botY-topY, shadowCol);
+  // ── Post shadows ─────────────────────────────────────
+  drawPixelRect(lp,     topY+postW, rp-lp,    4,         shadowCol);
+  drawPixelRect(lp+postW, topY,       4,      botY-topY, shadowCol);
+  drawPixelRect(rp+postW, topY,       4,      botY-topY, shadowCol);
 
-  // Posts
-  drawPixelRect(lp, topY, postW, botY-topY, postCol); // left
-  drawPixelRect(rp, topY, postW, botY-topY, postCol); // right
-  drawPixelRect(lp, topY, rp-lp+postW, postW, postCol); // crossbar
+  // ── Posts & crossbar ─────────────────────────────────
+  drawPixelRect(lp, topY, postW, botY-topY, postCol);         // left post
+  drawPixelRect(rp, topY, postW, botY-topY, postCol);         // right post
+  drawPixelRect(lp, topY, rp-lp+postW, postW, postCol);      // crossbar
 
-  // Goal depth lines
-  ctx.strokeStyle='rgba(255,255,255,0.3)';
-  ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(px(lp),py(topY)); ctx.lineTo(px(lp+16),py(topY-18)); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(px(rp+postW),py(topY)); ctx.lineTo(px(rp-16+postW),py(topY-18)); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(px(lp+16),py(topY-18)); ctx.lineTo(px(rp-16+postW),py(topY-18)); ctx.stroke();
+  // Post shine when bulging (goal flash)
+  if(bulgeAmt > 2){
+    const flashAlpha = (bulgeAmt/14) * 0.35;
+    drawPixelRect(lp, topY, postW, botY-topY, `rgba(255,255,150,${flashAlpha})`);
+    drawPixelRect(rp, topY, postW, botY-topY, `rgba(255,255,150,${flashAlpha})`);
+    drawPixelRect(lp, topY, rp-lp+postW, postW, `rgba(255,255,150,${flashAlpha})`);
+  }
+
+  // ── Goal depth lines ─────────────────────────────────
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth   = 1;
+  ctx.beginPath(); ctx.moveTo(px(lp),       py(topY)); ctx.lineTo(px(lp+16),         py(topY-18)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px(rp+postW), py(topY)); ctx.lineTo(px(rp-16+postW),   py(topY-18)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px(lp+16),    py(topY-18)); ctx.lineTo(px(rp-16+postW),py(topY-18)); ctx.stroke();
 }
 
 function drawGoalkeeper(){
@@ -1126,51 +1512,83 @@ function drawGoalkeeper(){
 
 function drawBall(){
   if(!ballAnim) {
-    // Static ball on spot
+    // Static ball on spot — draw any lingering trail first
+    drawBallTrail();
     drawBallAt(W/2, H*0.69, 14, 0);
     return;
   }
+
   const {sx,sy,tx,ty,t,dur} = ballAnim;
-  const prog=Math.min(t/dur,1);
-  const ease=prog<0.5?2*prog*prog:1-Math.pow(-2*prog+2,2)/2;
+  const prog  = Math.min(t/dur, 1);
+  const ease  = prog<0.5 ? 2*prog*prog : 1-Math.pow(-2*prog+2,2)/2;
 
-  // Curve effect
-  const curvePush = curveDir * Math.sin(prog*Math.PI) * 60;
+  const curvePush = curveDir * Math.sin(prog*Math.PI) * 60
+                  + windStrength * Math.sin(prog*Math.PI) * 28; // wind nudge
+  const bx = sx + (tx-sx)*ease + curvePush;
+  const arc = Math.sin(prog*Math.PI) * (-80 * ballAnim.power);
+  const by = sy + (ty-sy)*ease + arc;
 
-  const bx=sx+(tx-sx)*ease + curvePush;
-  // Arc trajectory
-  const arc=Math.sin(prog*Math.PI)*(-80*(ballAnim.power));
-  const by=sy+(ty-sy)*ease+arc;
+  const scale = 1 - prog*0.55;
+  const r = 14 * scale;
 
-  // Scale (perspective shrink)
-  const scale=1-prog*0.55;
-  const r=14*scale;
+  ballAnim.spin += 0.3 + prog*0.2;
 
-  // Spin
-  ballAnim.spin += 0.3+prog*0.2;
+  // Trail colour by zone
+  if(prog > 0.05 && prog < 0.95){
+    const trailCol = lastShotZone
+      ? lastShotZone.col
+      : (ballAnim.outcome==='curve' ? '#0ff' : '#fff');
+    ballTrail.push({ x:bx, y:by, r:r*0.85, alpha:0.55, col:trailCol });
+    if(ballTrail.length > TRAIL_LEN) ballTrail.shift();
+  }
 
-  drawBallAt(bx,by,r,ballAnim.spin);
+  drawBallTrail();
 
-  // Ball shadow on pitch
-  const shadowProg=prog;
-  const sx2=sx+(W/2-sx)*shadowProg;
-  const sy2=H*0.72;
-  const sr=12*(1-prog*0.5);
-  ctx.fillStyle=`rgba(0,0,0,${0.35*(1-prog*0.4)})`;
+  const sx2 = sx + (W/2-sx)*prog;
+  const sy2 = H*0.72;
+  const sr  = 12*(1-prog*0.5);
+  ctx.fillStyle = `rgba(0,0,0,${0.35*(1-prog*0.4)})`;
   ctx.beginPath();
-  ctx.ellipse(px(sx2),py(sy2),sr,sr*0.35,0,0,Math.PI*2);
+  ctx.ellipse(px(sx2),py(sy2), sr, sr*0.35, 0, 0, Math.PI*2);
   ctx.fill();
 
-  // Advance animation
-  ballAnim.t++;
-  if(ballAnim.t>=ballAnim.dur && !ballAnim.resolved){
-    ballAnim.resolved = true; // prevent double-fire
+  drawBallAt(bx, by, r, ballAnim.spin);
+
+  // Advance — respects freeze frames only
+  if(freezeFrames > 0){
+    freezeFrames--;
+  } else {
+    ballAnim.t++;
+  }
+
+  if(ballAnim && ballAnim.t >= ballAnim.dur && !ballAnim.resolved){
+    ballAnim.resolved = true;
     const outcome = ballAnim.outcome;
     if(outcome==='post') spawnPostParticles(tx,ty);
     if(outcome==='save') spawnSaveParticles(tx,ty);
     ballAnim = null;
-    processResult(outcome); // ← was wrongly calling resolveOutcome() which only returns a string
+    processResult(outcome);
   }
+}
+
+function drawBallTrail(){
+  for(let i=0; i<ballTrail.length; i++){
+    const t2  = ballTrail[i];
+    const age = i / TRAIL_LEN;             // 0=oldest, 1=newest
+    const a   = t2.alpha * age * age;      // quadratic fade — older = more transparent
+    const tr  = t2.r * (0.3 + age*0.7);   // older ghosts are smaller
+    ctx.globalAlpha = a;
+    ctx.fillStyle   = t2.col;
+    ctx.beginPath();
+    ctx.arc(px(t2.x), py(t2.y), Math.max(1,tr), 0, Math.PI*2);
+    ctx.fill();
+    // Small inner dot for pixel feel
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(px(t2.x), py(t2.y), Math.max(0.5, tr*0.3), 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawBallAt(x,y,r,spin){
@@ -1720,13 +2138,133 @@ function update(){
 
   drawArrowKeyAim();
   updateParticles();
+
+  // ── Commentator timer tick ────────────────────────────
+  if(commentatorTimer > 0) commentatorTimer--;
+
+  // ── Crowd mode timer ──────────────────────────────────
+  if(crowdModeTimer > 0){
+    crowdModeTimer--;
+  } else {
+    crowdMode = 'idle';
+  }
+
+  // ── Wind flag wave ─────────────────────────────────────
+  windAngle += 0.08;
+}
+
+function drawCommentator(){
+  if(!commentatorLine || commentatorTimer <= 0) return;
+
+  const fadeFrames = 20;
+  const alpha = Math.min(1, commentatorTimer / fadeFrames);
+
+  // Background pill
+  const text   = commentatorLine;
+  ctx.font     = '9px "Press Start 2P"';
+  const tw     = ctx.measureText(text).width;
+  const boxW   = tw + 28;
+  const boxH   = 22;
+  const boxX   = W/2 - boxW/2;
+  const boxY   = H - 28;
+
+  ctx.globalAlpha = alpha * 0.82;
+  ctx.fillStyle   = '#000d1a';
+  // Rounded rect approximation with pixel rects
+  ctx.fillRect(px(boxX+4), py(boxY),     boxW-8, boxH);
+  ctx.fillRect(px(boxX),   py(boxY+4),   boxW,   boxH-8);
+  ctx.fillRect(px(boxX+2), py(boxY+2),   boxW-4, boxH-4);
+
+  // Border
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(px(boxX+1), py(boxY+1), boxW-2, boxH-2);
+
+  // Microphone icon pixel
+  ctx.fillStyle = '#0ff';
+  ctx.fillRect(px(boxX+8),  py(boxY+7),  4, 6);
+  ctx.fillRect(px(boxX+6),  py(boxY+11), 8, 2);
+  ctx.fillRect(px(boxX+9),  py(boxY+13), 2, 3);
+
+  // Text
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle   = '#fff';
+  ctx.font        = '9px "Press Start 2P"';
+  ctx.textAlign   = 'left';
+  ctx.fillText(text, px(boxX+20), py(boxY+14));
+
+  ctx.globalAlpha = 1;
+  ctx.textAlign   = 'center';
+}
+
+function drawWindFlag(){
+  if(state !== 'aiming' && state !== 'kicking') return;
+
+  const fx = 18, fy = 52;   // top-left corner position
+  const poleH = 28;
+
+  // Box background
+  ctx.fillStyle = 'rgba(0,0,0,0.60)';
+  ctx.fillRect(fx-4, fy-4, 66, 44);
+  ctx.strokeStyle = 'rgba(0,200,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(fx-4, fy-4, 66, 44);
+
+  // Label
+  ctx.fillStyle = '#0cf';
+  ctx.font = '5px "Press Start 2P"';
+  ctx.textAlign = 'left';
+  ctx.fillText('WIND', fx, fy+4);
+
+  // Flagpole
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(fx+6, fy+8);
+  ctx.lineTo(fx+6, fy+8+poleH);
+  ctx.stroke();
+
+  // Animated flag — sine wave cloth
+  const segCount = 6;
+  const flagW    = 22;
+  const flagH    = 8;
+  const flagY    = fy+10;
+  const dir      = windStrength >= 0 ? 1 : -1;
+  const speed    = Math.abs(windStrength);
+
+  ctx.beginPath();
+  ctx.moveTo(fx+6, flagY);
+  for(let s=0; s<=segCount; s++){
+    const t2  = s / segCount;
+    const wx  = fx+6 + dir * t2 * flagW;
+    const wy  = flagY + Math.sin(windAngle*2 + t2*Math.PI*1.5) * flagH*0.5*speed*t2;
+    if(s===0) ctx.moveTo(wx, wy);
+    else ctx.lineTo(wx, wy);
+  }
+  // Fill flag shape
+  const windColour = windStrength > 0.4 ? '#ff4444'
+                   : windStrength < -0.4 ? '#4488ff'
+                   : '#ffdd00';
+  ctx.strokeStyle = windColour;
+  ctx.lineWidth   = 5;
+  ctx.lineCap     = 'round';
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  // Strength text
+  const strLabel = Math.abs(windStrength) < 0.15 ? 'CALM'
+                 : Math.abs(windStrength) < 0.45 ? (dir>0?'>>':' <<')
+                 : (dir>0?'>>>':'<<<');
+  ctx.fillStyle = windColour;
+  ctx.font      = '5px "Press Start 2P"';
+  ctx.fillText(strLabel, fx+32, flagY+8);
 }
 
 function render(){
   ctx.save();
   ctx.translate(px(shake.x), py(shake.y));
 
-  // Clear
   ctx.fillStyle='#000';
   ctx.fillRect(-10,-10,W+20,H+20);
 
@@ -1740,9 +2278,11 @@ function render(){
   drawLegs();
   drawAimReticle();
   drawPowerBar();
+  drawWindFlag();
   drawArrows();
   drawParticles();
   drawPixelGoalLine();
+  drawCommentator();
   drawVignette();
   drawFlicker();
 
