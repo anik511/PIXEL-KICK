@@ -122,6 +122,94 @@
   }
   @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
 
+  /* Difficulty buttons */
+  .diff-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    padding: 8px 10px;
+    border: 2px solid #444;
+    background: #111;
+    color: #888;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.1s;
+    letter-spacing: 1px;
+    touch-action: manipulation;
+  }
+  .diff-btn:hover  { background:#222; color:#fff; }
+  .diff-btn.active-easy   { border-color:#00ff88; color:#00ff88; background:rgba(0,255,136,0.12); box-shadow:0 0 10px rgba(0,255,136,0.4); }
+  .diff-btn.active-normal { border-color:#ffff00; color:#ffff00; background:rgba(255,255,0,0.10);  box-shadow:0 0 10px rgba(255,255,0,0.4); }
+  .diff-btn.active-hard   { border-color:#ff4444; color:#ff4444; background:rgba(255,68,68,0.12);  box-shadow:0 0 10px rgba(255,68,68,0.4); }
+
+  /* ── Main Menu Button ───────────────────────────────────── */
+  #menu-btn {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 25;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 6px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.75);
+    color: #0cf;
+    border: 1px solid #0cf;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    display: none;
+    touch-action: manipulation;
+    transition: background 0.1s, box-shadow 0.1s;
+  }
+  #menu-btn:hover {
+    background: rgba(0,200,255,0.15);
+    box-shadow: 0 0 8px rgba(0,200,255,0.5);
+  }
+
+  /* ── Play Again / Menu overlay on gameover ──────────────── */
+  #gameover-btns {
+    position: absolute;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: 12px;
+    z-index: 25;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+  }
+  .go-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    touch-action: manipulation;
+    transition: all 0.1s;
+  }
+  .go-btn.play-again {
+    background: radial-gradient(ellipse at 40% 35%, #ff6600, #992200);
+    border: 2px solid #ff9944;
+    color: #fff;
+    box-shadow: 0 3px 0 #550000, 0 0 14px rgba(255,100,0,0.4);
+  }
+  .go-btn.play-again:hover {
+    box-shadow: 0 1px 0 #550000, 0 0 22px rgba(255,180,0,0.6);
+    transform: translateY(2px);
+  }
+  .go-btn.main-menu {
+    background: rgba(0,10,30,0.9);
+    border: 2px solid #0cf;
+    color: #0cf;
+    box-shadow: 0 3px 0 #004, 0 0 10px rgba(0,200,255,0.3);
+  }
+  .go-btn.main-menu:hover {
+    background: rgba(0,200,255,0.12);
+    box-shadow: 0 1px 0 #004, 0 0 18px rgba(0,200,255,0.5);
+    transform: translateY(2px);
+  }
+
   #hud {
     position: absolute;
     top: 0; left: 0;
@@ -244,12 +332,29 @@
       <div class="title-glow">PIXEL KICK</div>
       <div style="font-family:'VT323',monospace;font-size:16px;color:#888;text-shadow:1px 1px 0 #333;">RETRO ARCADE SOCCER ©1987</div>
       <div class="title-sub" style="margin-top:6px;">— INSERT COIN —</div>
+
+      <!-- Difficulty selector -->
+      <div style="display:flex;gap:10px;margin-top:4px;" id="diff-buttons">
+        <button class="diff-btn" data-diff="easy"   onclick="setDifficulty('easy')">EASY</button>
+        <button class="diff-btn" data-diff="normal" onclick="setDifficulty('normal')">NORMAL</button>
+        <button class="diff-btn" data-diff="hard"   onclick="setDifficulty('hard')">HARD</button>
+      </div>
+
       <div class="title-info" id="title-controls">
         DRAG / ARROWS → AIM<br>
         HOLD SPACE → CHARGE<br>
         RELEASE → SHOOT
       </div>
       <div style="margin-top:6px;font-family:'VT323',monospace;font-size:13px;color:#555;">HI-SCORE: 9999</div>
+    </div>
+
+    <!-- Main menu button — shown during gameplay -->
+    <button id="menu-btn" onclick="goToMenu()">☰ MENU</button>
+
+    <!-- Gameover action buttons overlay -->
+    <div id="gameover-btns">
+      <button class="go-btn play-again" onclick="initGame()">⚽ PLAY AGAIN</button>
+      <button class="go-btn main-menu"  onclick="goToMenu()">⌂ MAIN MENU</button>
     </div>
 
     <!-- Mobile shoot button lives inside wrapper so it scales with it -->
@@ -306,7 +411,24 @@ function resizeGame(){
 window.addEventListener('resize', resizeGame);
 resizeGame();
 
-// ─── TOUCH → CANVAS COORDINATE MAPPING ───────────────────
+// ─── DIFFICULTY SELECTOR ──────────────────────────────────
+// Declared here (before setDifficulty call) so no TDZ error
+let difficulty = 'normal';
+const DIFF = {
+  easy:   { goalMult: 1.35, gkSpeed: 0.6,  label: 'EASY',   col: '#00ff88' },
+  normal: { goalMult: 1.0,  gkSpeed: 1.0,  label: 'NORMAL', col: '#ffff00' },
+  hard:   { goalMult: 0.60, gkSpeed: 1.55, label: 'HARD',   col: '#ff4444' },
+};
+
+function setDifficulty(d){
+  difficulty = d;
+  document.querySelectorAll('.diff-btn').forEach(btn => {
+    btn.classList.remove('active-easy','active-normal','active-hard');
+    if(btn.dataset.diff === d) btn.classList.add(`active-${d}`);
+  });
+}
+// Default to normal on load
+setDifficulty('normal');
 function touchToCanvas(touch){
   const rect = canvas.getBoundingClientRect();
   return {
@@ -433,6 +555,12 @@ let windAngle    = 0;
 // ── Feature: Crowd Reaction Mode ──────────────────────────
 let crowdMode    = 'idle';
 let crowdModeTimer = 0;
+
+// ── Feature: Shot history (for replay summary) ─────────────
+let shotHistory = []; // [{shot, zone, outcome}]
+
+// ── Feature: Hot streak visual ────────────────────────────
+let streakPulse = 0;
 
 // ─── INIT ─────────────────────────────────────────────────
 for(let i=0;i<80;i++) stars.push({x:Math.random()*W,y:Math.random()*(H*0.35),b:Math.random()});
@@ -667,7 +795,36 @@ canvas.addEventListener('click', e=>{
 });
 
 // ─── GAME LOGIC ───────────────────────────────────────────
-function startGame(){ document.getElementById('title-screen').style.display='none'; initGame(); }
+function startGame(){
+  document.getElementById('title-screen').style.display='none';
+  document.getElementById('menu-btn').style.display='block';
+  document.getElementById('gameover-btns').style.display='none';
+  initGame();
+}
+
+function goToMenu(){
+  // Reset all state and return to title screen
+  state = 'title';
+  ballAnim=null; kickAnim=null;
+  ballTrail=[];
+  freezeFrames=0;
+  divotMark=null;
+  netBulgeTimer=0;
+  commentatorLine=''; commentatorTimer=0;
+  isCharging=false; chargeLevel=0;
+  shootBtnDown=false;
+  shootBtn.classList.remove('pressed');
+  document.getElementById('title-screen').style.display='flex';
+  document.getElementById('menu-btn').style.display='none';
+  document.getElementById('gameover-btns').style.display='none';
+  document.getElementById('outcome-text').style.opacity='0';
+  document.getElementById('combo-text').style.opacity='0';
+  // Reset shoot btn label
+  const btnLabel=shootBtn.querySelector('.btn-label');
+  const btnIcon=shootBtn.querySelector('.btn-icon');
+  if(btnLabel) btnLabel.textContent='SHOOT';
+  if(btnIcon)  btnIcon.textContent='⚽';
+}
 
 function initGame(){
   score=0; totalShots=0; combo=0; maxCombo=0; shotsLeft=MAX_SHOTS;
@@ -679,6 +836,12 @@ function initGame(){
   freezeFrames=0;
   windStrength=0; windAngle=0;
   crowdMode='idle'; crowdModeTimer=0;
+  shotHistory=[];
+  streakPulse=0;
+  // Show/hide overlay buttons
+  document.getElementById('title-screen').style.display='none';
+  document.getElementById('gameover-btns').style.display='none';
+  document.getElementById('menu-btn').style.display='block';
   updateHUD();
   state='aiming';
   chargeLevel=0;
@@ -731,6 +894,11 @@ function getZone(lvl){
   return POWER_ZONES.find(z => lvl >= z.from && lvl < z.to) || POWER_ZONES[3];
 }
 
+// ─── HAPTIC FEEDBACK ──────────────────────────────────────
+function haptic(pattern){
+  try { if(navigator.vibrate) navigator.vibrate(pattern); } catch(e){}
+}
+
 function shoot(){
   if(state!=='aiming') return;
   state='kicking';
@@ -778,7 +946,9 @@ function shoot(){
   } else {
     // ── Aimed inside goal — use zone goal-chance roll ─────
     const roll   = Math.random();
-    const isGoal = roll < zone.goalChance;
+    // Apply difficulty multiplier to goal chance
+    const adjChance = Math.min(0.97, zone.goalChance * DIFF[difficulty].goalMult);
+    const isGoal = roll < adjChance;
 
     if(isGoal){
       const isCurve = Math.random() < 0.18;
@@ -864,6 +1034,16 @@ function shoot(){
   setTimeout(() => playSound('whoosh'), 80);
   playSound('whistle');
 
+  // ── Haptic: kick thud ────────────────────────────────────
+  haptic([30]);
+
+  // ── Record shot for replay summary ───────────────────────
+  shotHistory.push({
+    shot: totalShots,
+    zone: zone.label,
+    outcome: currentOutcome  // will be confirmed in processResult
+  });
+
   // ── Commentator pre-shot line (zone-aware) ───────────────
   const preLines = {
     POOR:    ['A weak effort...','Not much behind that one.','Lacking conviction!'],
@@ -924,22 +1104,26 @@ function processResult(o){
     netBulgeTimer = 1;
     crowdMode = 'goal';  crowdModeTimer = 180;
     playSound('goal');
+    haptic([80,20,80]);   // double buzz for goal
   } else if(o==='post'){
     triggerShake(5,10);
     freezeFrames = 5;
     combo=0;
     crowdMode = 'post';  crowdModeTimer = 90;
     playSound('post');
+    haptic([60,30,30]);
   } else if(o==='save'){
     triggerShake(3,8);
     freezeFrames = 4;
     combo=0;
     crowdMode = 'save';  crowdModeTimer = 120;
     playSound('save');
+    haptic([40,20,40]);
   } else {
     combo=0;
     crowdMode = 'miss';  crowdModeTimer = 100;
     playSound('miss');
+    haptic([200]);        // long sad buzz for miss
   }
 
   state='result';
@@ -951,7 +1135,14 @@ function processResult(o){
   showOutcome(msg, o, zoneLabel);
 
   const delay = shotsLeft<=0 ? 2500 : 2000;
-  setTimeout(()=>{ if(state==='result') nextShot(); }, delay);
+  setTimeout(()=>{
+    if(state==='result') nextShot();
+    // Show gameover buttons after delay if game ended
+    if(shotsLeft<=0){
+      document.getElementById('gameover-btns').style.display='flex';
+      document.getElementById('menu-btn').style.display='none';
+    }
+  }, delay);
 }
 
 function updateHUD(){
@@ -1496,7 +1687,8 @@ function drawGoalkeeper(){
     if(fc >= 38){ gkAnim.phase = 'idle'; gkAnim.frameCount = 0; }
   }
 
-  gkAnim.frameCount++;
+  // Difficulty scales how fast GK reacts
+  gkAnim.frameCount += DIFF[difficulty].gkSpeed;
 
   // ══════════════════════════════════════════════════════════
   // DRAW GK
@@ -1685,9 +1877,17 @@ function drawBall(){
   const ease  = prog<0.5 ? 2*prog*prog : 1-Math.pow(-2*prog+2,2)/2;
 
   const curvePush = curveDir * Math.sin(prog*Math.PI) * 60
-                  + windStrength * Math.sin(prog*Math.PI) * 28; // wind nudge
+                  + windStrength * Math.sin(prog*Math.PI) * 28;
   const bx = sx + (tx-sx)*ease + curvePush;
-  const arc = Math.sin(prog*Math.PI) * (-80 * ballAnim.power);
+
+  // ── Arc height varies with aim position in goal ───────────
+  // ty near crossbar (H*0.27) → high lofted arc (-150)
+  // ty near ground   (H*0.50) → flat skimming arc (-18)
+  const GOAL_TOP = H * 0.27, GOAL_BOT = H * 0.50;
+  const aimNorm  = Math.max(0, Math.min(1, (ballAnim.ty - GOAL_TOP) / (GOAL_BOT - GOAL_TOP)));
+  // aimNorm: 0 = aimed at top (crossbar) → high arc, 1 = aimed low → flat
+  const arcHeight = -18 - (1 - aimNorm) * 132; // -18 (flat) to -150 (looping)
+  const arc = Math.sin(prog*Math.PI) * arcHeight * ballAnim.power;
   const by = sy + (ty-sy)*ease + arc;
 
   const scale = 1 - prog*0.55;
@@ -1757,7 +1957,16 @@ function drawBallAt(x,y,r,spin){
   ctx.save();
   ctx.translate(px(x),py(y));
 
-  // Shadow under ball
+  // ── Hot streak glow ring (combo ≥ 2) ─────────────────────
+  if(combo >= 2 && ballAnim){
+    const intensity = Math.min((combo-1)/3, 1);
+    const glowR = r + 4 + Math.sin(streakPulse*2)*2;
+    const glowAlpha = 0.35 + 0.25*Math.sin(streakPulse*2);
+    ctx.beginPath();
+    ctx.arc(0,0,glowR,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,${Math.floor(120-intensity*80)},0,${glowAlpha*intensity})`;
+    ctx.fill();
+  }
   ctx.fillStyle='rgba(0,0,0,0.25)';
   ctx.beginPath();
   ctx.ellipse(0,r*0.8,r*0.9,r*0.3,0,0,Math.PI*2);
@@ -2176,37 +2385,87 @@ function showOutcome(text, o, zoneLabel=''){
 
 function drawGameover(){
   if(state!=='gameover') return;
-  ctx.fillStyle='rgba(0,0,0,0.75)';
+
+  ctx.fillStyle='rgba(0,0,0,0.82)';
   ctx.fillRect(0,0,W,H);
 
   ctx.save();
-  ctx.font='22px "Press Start 2P"';
   ctx.textAlign='center';
+
+  // ── FULL TIME header ──────────────────────────────────────
+  ctx.font='20px "Press Start 2P"';
   ctx.fillStyle='#ff0';
-  ctx.shadowColor='#ff0';
-  ctx.shadowBlur=20;
-  ctx.fillText('FULL TIME!',W/2,H*0.35);
+  ctx.shadowColor='#ff0'; ctx.shadowBlur=18;
+  ctx.fillText('FULL TIME!', W/2, 38);
   ctx.shadowBlur=0;
 
-  ctx.font='11px "Press Start 2P"';
-  ctx.fillStyle='#fff';
-  ctx.fillText(`GOALS: ${score} / ${totalShots} SHOTS`,W/2,H*0.46);
-  ctx.fillText(`BEST COMBO: x${maxCombo}`,W/2,H*0.54);
-
-  const rating=score>=4?'WORLD CLASS':score>=3?'GREAT PLAYER':score>=2?'DECENT SHOT':score>=1?'NEEDS PRACTICE':'MISSED THE NET';
-  ctx.fillStyle='#0ff';
+  // Score + difficulty badge
   ctx.font='9px "Press Start 2P"';
-  ctx.fillText(rating,W/2,H*0.63);
+  ctx.fillStyle='#fff';
+  ctx.fillText(`GOALS: ${score} / ${totalShots}  |  COMBO: x${maxCombo}`, W/2, 60);
 
-  // Pixel trophy if 4+ goals
-  if(score>=4){
-    drawTrophy(W/2,H*0.76);
-  }
+  const dc = DIFF[difficulty].col;
+  ctx.fillStyle=dc;
+  ctx.font='7px "Press Start 2P"';
+  ctx.fillText(`[ ${DIFF[difficulty].label} MODE ]`, W/2, 76);
 
+  // ── Rating ────────────────────────────────────────────────
+  const rating = score>=5?'LEGEND 🏆':score>=4?'WORLD CLASS':score>=3?'GREAT PLAYER':score>=2?'DECENT SHOT':score>=1?'NEEDS PRACTICE':'MISSED THE NET';
+  ctx.fillStyle='#0ff';
   ctx.font='8px "Press Start 2P"';
-  ctx.fillStyle='rgba(255,255,255,0.6)';
-  const blink2=Math.floor(frame/20)%2===0;
-  if(blink2) ctx.fillText('CLICK OR SPACE TO PLAY AGAIN',W/2,H*0.90);
+  ctx.fillText(rating, W/2, 94);
+
+  // ── Replay summary ────────────────────────────────────────
+  ctx.font='7px "Press Start 2P"';
+  ctx.textAlign='left';
+
+  // Panel background
+  ctx.fillStyle='rgba(0,20,40,0.7)';
+  ctx.fillRect(28, 104, W-56, 188);
+  ctx.strokeStyle='rgba(0,200,255,0.3)';
+  ctx.lineWidth=1;
+  ctx.strokeRect(28, 104, W-56, 188);
+
+  // Header row
+  ctx.fillStyle='rgba(0,200,255,0.7)';
+  ctx.fillText('SHOT', 38, 120);
+  ctx.fillText('POWER', 100, 120);
+  ctx.fillText('RESULT', 220, 120);
+  ctx.fillStyle='rgba(255,255,255,0.25)';
+  ctx.fillRect(28, 123, W-56, 1);
+
+  const outcomeIcon = { goal:'⚽ GOAL', curve:'🌀 CURVE', save:'🧤 SAVED', post:'🏛 POST', miss:'❌ MISS' };
+  const zoneCol     = { POOR:'#ff8800', GOOD:'#ffff00', PERFECT:'#00ff88', BAD:'#ff4444' };
+
+  shotHistory.forEach((h, i) => {
+    const rowY = 140 + i * 30;
+    // Row highlight for goals
+    if(h.outcome==='goal'||h.outcome==='curve'){
+      ctx.fillStyle='rgba(0,255,100,0.07)';
+      ctx.fillRect(28, rowY-12, W-56, 26);
+    }
+    // Shot number
+    ctx.fillStyle='#aaa';
+    ctx.fillText(`#${h.shot}`, 38, rowY);
+    // Zone pill
+    ctx.fillStyle = zoneCol[h.zone] || '#fff';
+    ctx.fillRect(95, rowY-10, 70, 14);
+    ctx.fillStyle = '#000';
+    ctx.font='6px "Press Start 2P"';
+    ctx.textAlign='center';
+    ctx.fillText(h.zone, 130, rowY);
+    ctx.font='7px "Press Start 2P"';
+    ctx.textAlign='left';
+    // Outcome
+    const isGood = h.outcome==='goal'||h.outcome==='curve';
+    ctx.fillStyle = isGood ? '#00ff88' : h.outcome==='save'||h.outcome==='post' ? '#ff8800' : '#ff4444';
+    ctx.fillText(outcomeIcon[h.outcome]||h.outcome, 178, rowY);
+  });
+
+  // ── Trophy ────────────────────────────────────────────────
+  if(score>=4) drawTrophy(W/2, 334);
+
+  // Buttons are shown via HTML overlay (#gameover-btns) — no canvas text needed
   ctx.restore();
 }
 
@@ -2227,11 +2486,37 @@ function drawTrophy(x,y){
 }
 
 function drawVignette(){
+  // Base vignette
   const v=ctx.createRadialGradient(W/2,H/2,W*0.3,W/2,H/2,W*0.75);
   v.addColorStop(0,'transparent');
   v.addColorStop(1,'rgba(0,0,0,0.5)');
   ctx.fillStyle=v;
   ctx.fillRect(0,0,W,H);
+
+  // ── Hot streak pulse (combo ≥ 2) ─────────────────────────
+  if(combo >= 2){
+    const intensity = Math.min((combo - 1) / 3, 1); // ramps up with combo
+    const pulse = (Math.sin(streakPulse) * 0.5 + 0.5) * intensity;
+    const sv = ctx.createRadialGradient(W/2,H/2,W*0.2,W/2,H/2,W*0.78);
+    sv.addColorStop(0,'transparent');
+    sv.addColorStop(0.7,'transparent');
+    sv.addColorStop(1,`rgba(255,${Math.floor(80-intensity*60)},0,${0.38*pulse})`);
+    ctx.fillStyle=sv;
+    ctx.fillRect(0,0,W,H);
+
+    // Streak badge — top right corner
+    const badgeAlpha = 0.7 + 0.3*Math.sin(streakPulse*1.5);
+    ctx.save();
+    ctx.globalAlpha = badgeAlpha;
+    ctx.fillStyle   = `rgba(255,${Math.floor(60+intensity*80)},0,0.85)`;
+    ctx.fillRect(W-84, 6, 78, 22);
+    ctx.fillStyle   = '#fff';
+    ctx.font        = '7px "Press Start 2P"';
+    ctx.textAlign   = 'right';
+    ctx.fillText(`🔥 x${combo} HOT`, W-8, 21);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
 }
 
 function drawFlicker(){
@@ -2332,6 +2617,9 @@ function update(){
 
   // ── Wind flag wave ─────────────────────────────────────
   windAngle += 0.08;
+
+  // ── Hot streak pulse oscillator ───────────────────────
+  if(combo >= 2) streakPulse += 0.07 + combo * 0.01;
 }
 
 function drawCommentator(){
