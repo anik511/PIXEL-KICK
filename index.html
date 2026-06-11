@@ -141,6 +141,70 @@
   .diff-btn.active-normal { border-color:#ffff00; color:#ffff00; background:rgba(255,255,0,0.10);  box-shadow:0 0 10px rgba(255,255,0,0.4); }
   .diff-btn.active-hard   { border-color:#ff4444; color:#ff4444; background:rgba(255,68,68,0.12);  box-shadow:0 0 10px rgba(255,68,68,0.4); }
 
+  /* ── Mode selector buttons ──────────────────────────────── */
+  .mode-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    padding: 9px 12px;
+    border: 2px solid #444;
+    background: #111;
+    color: #888;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.1s;
+    letter-spacing: 1px;
+    touch-action: manipulation;
+  }
+  .mode-btn:hover { background:#222; color:#fff; }
+  .mode-btn.active-cpu { border-color:#0cf; color:#0cf; background:rgba(0,200,255,0.12); box-shadow:0 0 12px rgba(0,200,255,0.45); }
+  .mode-btn.active-2p  { border-color:#f8f; color:#f8f; background:rgba(255,140,255,0.12); box-shadow:0 0 12px rgba(255,140,255,0.45); }
+
+  /* ── P2 intro overlay ───────────────────────────────────── */
+  #p2-intro-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.88);
+    z-index: 22;
+    gap: 16px;
+  }
+  #p2-intro-overlay .p2-title {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 20px;
+    color: #f8f;
+    text-shadow: 0 0 18px #f0f, 0 0 40px #a0a, 3px 3px 0 #400;
+    animation: titlePulse 1s ease-in-out infinite alternate;
+  }
+  #p2-intro-overlay .p2-score {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 13px;
+    color: #fff;
+  }
+  #p2-intro-overlay .p2-hint {
+    font-family: 'VT323', monospace;
+    font-size: 18px;
+    color: #aaa;
+    text-align: center;
+    line-height: 26px;
+  }
+  #p2-start-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    padding: 12px 20px;
+    background: radial-gradient(ellipse at 40% 35%, #cc44ff, #660099);
+    border: 2px solid #ff88ff;
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #330044, 0 0 18px rgba(200,0,255,0.5);
+    touch-action: manipulation;
+    animation: blink 1s step-end infinite;
+  }
+  #p2-start-btn:hover { transform:translateY(2px); box-shadow:0 2px 0 #330044,0 0 28px rgba(200,0,255,0.7); }
+
   /* ── Main Menu Button ───────────────────────────────────── */
   #menu-btn {
     position: absolute;
@@ -331,10 +395,16 @@
     <div id="title-screen">
       <div class="title-glow">PIXEL KICK</div>
       <div style="font-family:'VT323',monospace;font-size:16px;color:#888;text-shadow:1px 1px 0 #333;">RETRO ARCADE SOCCER ©1987</div>
-      <div class="title-sub" style="margin-top:6px;">— INSERT COIN —</div>
+      <div class="title-sub" style="margin-top:4px;">— INSERT COIN —</div>
 
-      <!-- Difficulty selector -->
-      <div style="display:flex;gap:10px;margin-top:4px;" id="diff-buttons">
+      <!-- Game mode selector -->
+      <div style="display:flex;gap:10px;margin-top:6px;" id="mode-buttons">
+        <button class="mode-btn" data-mode="cpu" onclick="setMode('cpu')">🤖 VS CPU</button>
+        <button class="mode-btn" data-mode="2p"  onclick="setMode('2p')">👥 2 PLAYER</button>
+      </div>
+
+      <!-- Difficulty selector (hidden in 2P) -->
+      <div style="display:flex;gap:8px;margin-top:4px;" id="diff-buttons">
         <button class="diff-btn" data-diff="easy"   onclick="setDifficulty('easy')">EASY</button>
         <button class="diff-btn" data-diff="normal" onclick="setDifficulty('normal')">NORMAL</button>
         <button class="diff-btn" data-diff="hard"   onclick="setDifficulty('hard')">HARD</button>
@@ -345,7 +415,16 @@
         HOLD SPACE → CHARGE<br>
         RELEASE → SHOOT
       </div>
-      <div style="margin-top:6px;font-family:'VT323',monospace;font-size:13px;color:#555;">HI-SCORE: 9999</div>
+      <div style="margin-top:4px;font-family:'VT323',monospace;font-size:13px;color:#555;">HI-SCORE: 9999</div>
+    </div>
+
+    <!-- P2 handoff overlay — shown between P1 and P2 turns in 2P mode -->
+    <div id="p2-intro-overlay">
+      <div class="p2-title">PLAYER 2</div>
+      <div class="p2-title" style="font-size:14px;margin-top:-8px;">YOUR TURN!</div>
+      <div class="p2-score" id="p2-score-line">P1: 0 goals</div>
+      <div class="p2-hint">Pass the device<br>to Player 2</div>
+      <button id="p2-start-btn" onclick="startP2Turn()">▶ P2 START</button>
     </div>
 
     <!-- Main menu button — shown during gameplay -->
@@ -411,14 +490,23 @@ function resizeGame(){
 window.addEventListener('resize', resizeGame);
 resizeGame();
 
-// ─── DIFFICULTY SELECTOR ──────────────────────────────────
-// Declared here (before setDifficulty call) so no TDZ error
+// ─── DIFFICULTY + MODE SELECTOR ───────────────────────────
+// All declared here — before setDifficulty/setMode calls — to avoid TDZ errors
 let difficulty = 'normal';
 const DIFF = {
   easy:   { goalMult: 1.35, gkSpeed: 0.6,  label: 'EASY',   col: '#00ff88' },
   normal: { goalMult: 1.0,  gkSpeed: 1.0,  label: 'NORMAL', col: '#ffff00' },
   hard:   { goalMult: 0.60, gkSpeed: 1.55, label: 'HARD',   col: '#ff4444' },
 };
+
+// 2-Player mode vars
+let gameMode     = 'cpu';   // 'cpu' | '2p'
+let activePlayer = 1;       // 1 or 2
+let p1Score      = 0;
+let p2Score      = 0;
+let p1History    = [];
+let p2History    = [];
+const P_COL      = { 1:'#4488ff', 2:'#ff4488' };
 
 function setDifficulty(d){
   difficulty = d;
@@ -427,8 +515,20 @@ function setDifficulty(d){
     if(btn.dataset.diff === d) btn.classList.add(`active-${d}`);
   });
 }
-// Default to normal on load
 setDifficulty('normal');
+
+function setMode(m){
+  gameMode = m;
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.classList.remove('active-cpu','active-2p');
+    if(btn.dataset.mode === m) btn.classList.add(`active-${m}`);
+  });
+  // Show/dim difficulty buttons — irrelevant in 2P but still visible
+  const diffBtns = document.getElementById('diff-buttons');
+  diffBtns.style.opacity = m==='2p' ? '0.35' : '1';
+  diffBtns.style.pointerEvents = m==='2p' ? 'none' : 'auto';
+}
+setMode('cpu');
 function touchToCanvas(touch){
   const rect = canvas.getBoundingClientRect();
   return {
@@ -478,6 +578,7 @@ shootBtn.addEventListener('touchstart', e => {
   if(state === 'result')   { nextShot();  return; }
   if(state === 'gameover') { initGame();  return; }
   if(state === 'aiming' && !isCharging){
+    haptic([10]);          // ← tiny tick: charge started
     isCharging   = true;
     shootBtnDown = true;
     shootBtn.classList.add('pressed');
@@ -487,6 +588,7 @@ shootBtn.addEventListener('touchstart', e => {
 shootBtn.addEventListener('touchend', e => {
   e.preventDefault();
   if(state === 'aiming' && isCharging && shootBtnDown){
+    haptic([25]);          // ← kick haptic RIGHT HERE in gesture handler
     shoot();
     isCharging   = false;
     shootBtnDown = false;
@@ -561,6 +663,16 @@ let shotHistory = []; // [{shot, zone, outcome}]
 
 // ── Feature: Hot streak visual ────────────────────────────
 let streakPulse = 0;
+
+// ── Penalty Shootout Mode ─────────────────────────────────
+let cpuScore        = 0;
+let cpuShotHistory  = [];
+let matchPhase      = 'player';
+let cpuShotQueue    = [];
+let cpuAnimTimer    = 0;
+let cpuShotIndex    = 0;
+let cpuCurrentShot  = null;
+let matchResult     = '';
 
 // ─── INIT ─────────────────────────────────────────────────
 for(let i=0;i<80;i++) stars.push({x:Math.random()*W,y:Math.random()*(H*0.35),b:Math.random()});
@@ -759,15 +871,17 @@ document.addEventListener('keydown', e=>{
   keys[e.code]=true;
 
   if(e.code==='Space'){
-    if(state==='title')   { startGame(); return; }
-    if(state==='aiming')  { if(!isCharging){ isCharging=true; chargeLevel=0; } return; }
-    if(state==='result')  { nextShot(); return; }
-    if(state==='gameover'){ initGame(); return; }
+    if(state==='title')    { startGame();   return; }
+    if(state==='aiming')   { if(!isCharging){ isCharging=true; chargeLevel=0; } return; }
+    if(state==='result')   { nextShot();    return; }
+    if(state==='p2_intro') { startP2Turn(); return; }
+    if(state==='gameover') { initGame();    return; }
   }
   if(e.code==='Enter'){
-    if(state==='title')   { startGame(); return; }
-    if(state==='result')  { nextShot(); return; }
-    if(state==='gameover'){ initGame(); return; }
+    if(state==='title')    { startGame();   return; }
+    if(state==='result')   { nextShot();    return; }
+    if(state==='p2_intro') { startP2Turn(); return; }
+    if(state==='gameover') { initGame();    return; }
   }
 });
 
@@ -775,6 +889,7 @@ document.addEventListener('keyup', e=>{
   keys[e.code]=false;
   // Space release fires the shot
   if(e.code==='Space' && state==='aiming' && isCharging){
+    haptic([25]);          // ← in keyup gesture handler
     shoot();
     isCharging=false;
   }
@@ -817,6 +932,7 @@ function goToMenu(){
   document.getElementById('title-screen').style.display='flex';
   document.getElementById('menu-btn').style.display='none';
   document.getElementById('gameover-btns').style.display='none';
+  document.getElementById('p2-intro-overlay').style.display='none';
   document.getElementById('outcome-text').style.opacity='0';
   document.getElementById('combo-text').style.opacity='0';
   // Reset shoot btn label
@@ -828,6 +944,10 @@ function goToMenu(){
 
 function initGame(){
   score=0; totalShots=0; combo=0; maxCombo=0; shotsLeft=MAX_SHOTS;
+  cpuScore=0; cpuShotHistory=[]; cpuShotQueue=[]; cpuShotIndex=0;
+  cpuAnimTimer=0; cpuCurrentShot=null; matchPhase='player'; matchResult='';
+  // 2P reset
+  activePlayer=1; p1Score=0; p2Score=0; p1History=[]; p2History=[];
   particles=[];
   ballTrail=[];
   divotMark=null;
@@ -838,9 +958,9 @@ function initGame(){
   crowdMode='idle'; crowdModeTimer=0;
   shotHistory=[];
   streakPulse=0;
-  // Show/hide overlay buttons
   document.getElementById('title-screen').style.display='none';
   document.getElementById('gameover-btns').style.display='none';
+  document.getElementById('p2-intro-overlay').style.display='none';
   document.getElementById('menu-btn').style.display='block';
   updateHUD();
   state='aiming';
@@ -862,7 +982,6 @@ function nextShot(){
   isCharging=false;
   shootBtnDown=false;
   shootBtn.classList.remove('pressed');
-  // Reset button label
   const btnLabel = shootBtn.querySelector('.btn-label');
   const btnIcon  = shootBtn.querySelector('.btn-icon');
   if(btnLabel) btnLabel.textContent = 'SHOOT';
@@ -870,8 +989,18 @@ function nextShot(){
   showOutcome('', '', '');
 
   if(shotsLeft<=0){
-    state='gameover';
-    updateHUD();
+    if(gameMode === '2p'){
+      if(activePlayer === 1){
+        // P1 done — hand off to P2
+        showP2Intro();
+      } else {
+        // P2 done — end match
+        p2Score = score;
+        endMatch2P();
+      }
+    } else {
+      startCpuPhase();
+    }
     return;
   }
   state='aiming';
@@ -1034,9 +1163,6 @@ function shoot(){
   setTimeout(() => playSound('whoosh'), 80);
   playSound('whistle');
 
-  // ── Haptic: kick thud ────────────────────────────────────
-  haptic([30]);
-
   // ── Record shot for replay summary ───────────────────────
   shotHistory.push({
     shot: totalShots,
@@ -1104,26 +1230,26 @@ function processResult(o){
     netBulgeTimer = 1;
     crowdMode = 'goal';  crowdModeTimer = 180;
     playSound('goal');
-    haptic([80,20,80]);   // double buzz for goal
+    setTimeout(()=>haptic([80,20,80]), 0);
   } else if(o==='post'){
     triggerShake(5,10);
     freezeFrames = 5;
     combo=0;
     crowdMode = 'post';  crowdModeTimer = 90;
     playSound('post');
-    haptic([60,30,30]);
+    setTimeout(()=>haptic([60,30,30]), 0);
   } else if(o==='save'){
     triggerShake(3,8);
     freezeFrames = 4;
     combo=0;
     crowdMode = 'save';  crowdModeTimer = 120;
     playSound('save');
-    haptic([40,20,40]);
+    setTimeout(()=>haptic([40,20,40]), 0);
   } else {
     combo=0;
     crowdMode = 'miss';  crowdModeTimer = 100;
     playSound('miss');
-    haptic([200]);        // long sad buzz for miss
+    setTimeout(()=>haptic([200]), 0);
   }
 
   state='result';
@@ -1134,31 +1260,285 @@ function processResult(o){
   const msg = resolveOutcome(o);
   showOutcome(msg, o, zoneLabel);
 
-  const delay = shotsLeft<=0 ? 2500 : 2000;
-  setTimeout(()=>{
-    if(state==='result') nextShot();
-    // Show gameover buttons after delay if game ended
-    if(shotsLeft<=0){
-      document.getElementById('gameover-btns').style.display='flex';
-      document.getElementById('menu-btn').style.display='none';
-    }
-  }, delay);
+  // Record in active player's history (2P) or shared history (CPU mode)
+  if(gameMode === '2p'){
+    const hist = activePlayer===1 ? p1History : p2History;
+    hist.push({ shot: MAX_SHOTS - shotsLeft, zone: zoneLabel, outcome: o });
+  }
+
+  const delay = shotsLeft<=0 ? 2200 : 1800;
+  setTimeout(()=>{ if(state==='result') nextShot(); }, delay);
 }
 
 function updateHUD(){
-  document.getElementById('scoreDisplay').textContent=`GOALS: ${score} | SHOTS: ${totalShots}`;
   const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if(state==='aiming'){
+    if(gameMode==='2p'){
+      const pLabel = `P${activePlayer}`;
+      const pOther = activePlayer===1 ? '' : `  P1: ${p1Score}`;
+      document.getElementById('scoreDisplay').textContent =
+        `${pLabel} SHOT ${totalShots+1}/5${pOther}`;
+    } else {
+      document.getElementById('scoreDisplay').textContent =
+        `YOU: ${score}  CPU: ${cpuScore}  |  SHOT ${totalShots+1}/5`;
+    }
     const hint = isMobile
       ? `⚽ x${shotsLeft}  DRAG TO AIM · HOLD BTN TO CHARGE`
       : `⚽ x${shotsLeft}  MOUSE/ARROWS=AIM  SPACE=SHOOT`;
     document.getElementById('shotsDisplay').textContent = hint;
+  } else if(state==='cpu_shooting'||state==='cpu_result'||state==='cpu_intro'){
+    document.getElementById('scoreDisplay').textContent =
+      `YOU: ${score}  CPU: ${cpuScore}  |  CPU SHOT ${cpuShotIndex}/5`;
+    document.getElementById('shotsDisplay').textContent = '⚡ CPU IS SHOOTING...';
+  } else if(state==='p2_intro'){
+    document.getElementById('scoreDisplay').textContent = `P1: ${p1Score} goals`;
+    document.getElementById('shotsDisplay').textContent = 'PASS TO PLAYER 2';
+  } else if(state==='gameover'){
+    if(gameMode==='2p'){
+      document.getElementById('scoreDisplay').textContent =
+        `FINAL: P1 ${p1Score} — ${p2Score} P2`;
+    } else {
+      document.getElementById('scoreDisplay').textContent =
+        `FINAL: YOU ${score} — ${cpuScore} CPU`;
+    }
+    document.getElementById('shotsDisplay').textContent='';
   } else {
+    if(gameMode==='2p'){
+      document.getElementById('scoreDisplay').textContent =
+        `P${activePlayer} SHOOTING...`;
+    } else {
+      document.getElementById('scoreDisplay').textContent =
+        `YOU: ${score}  CPU: ${cpuScore}`;
+    }
     document.getElementById('shotsDisplay').textContent='';
   }
 }
 
-// ─── PARTICLES ────────────────────────────────────────────
+// ─── 2-PLAYER HANDOFF ─────────────────────────────────────
+function showP2Intro(){
+  p1Score = score;   // lock in P1 score
+  state   = 'p2_intro';
+  // Update score line in overlay
+  document.getElementById('p2-score-line').textContent =
+    `P1 scored ${p1Score} / ${MAX_SHOTS}`;
+  const overlay = document.getElementById('p2-intro-overlay');
+  overlay.style.display = 'flex';
+  // Hide shoot button during handoff
+  shootBtn.classList.add('hidden');
+  updateHUD();
+}
+
+function startP2Turn(){
+  // Called when P2 presses their start button
+  document.getElementById('p2-intro-overlay').style.display='none';
+  // Reset all shot state for P2
+  activePlayer = 2;
+  score        = 0;   // P2 starts fresh score counter
+  totalShots   = 0;
+  shotsLeft    = MAX_SHOTS;
+  combo        = 0; maxCombo = 0;
+  ballAnim=null; kickAnim=null; ballTrail=[];
+  freezeFrames=0; divotMark=null; netBulgeTimer=0;
+  commentatorLine=''; commentatorTimer=0;
+  chargeLevel=0; isCharging=false;
+  gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
+  showOutcome('','','');
+  state = 'aiming';
+  updateHUD();
+  setCommentator('Player 2 — your turn!', 100);
+}
+
+function endMatch2P(){
+  matchResult = p1Score > p2Score ? 'p1win'
+              : p2Score > p1Score ? 'p2win'
+              : 'draw';
+  state = 'gameover';
+  document.getElementById('gameover-btns').style.display='flex';
+  document.getElementById('menu-btn').style.display='none';
+
+  if(matchResult==='p1win'||matchResult==='p2win'){
+    playSound('goal');
+    triggerShake(10,25);
+    spawnGoalParticles();
+    setTimeout(()=>spawnGoalParticles(),300);
+    crowdMode='goal'; crowdModeTimer=300;
+  } else {
+    playSound('post');
+  }
+  updateHUD();
+}
+
+// ─── CPU SHOOTOUT PHASE ───────────────────────────────────
+function startCpuPhase(){
+  matchPhase   = 'cpu';
+  cpuShotIndex = 0;
+  state        = 'cpu_intro';
+
+  // Pre-resolve all 5 CPU shots based on difficulty
+  // Easy CPU: 25% goal, Normal: 45%, Hard: 68%
+  const cpuGoalChance = difficulty==='easy'?0.25 : difficulty==='hard'?0.68 : 0.45;
+  cpuShotQueue = [];
+  for(let i=0;i<MAX_SHOTS;i++){
+    const r = Math.random();
+    let o;
+    if(r < cpuGoalChance)              o = 'goal';
+    else if(r < cpuGoalChance+0.22)    o = 'save';
+    else if(r < cpuGoalChance+0.32)    o = 'post';
+    else                               o = 'miss';
+    cpuShotQueue.push(o);
+  }
+
+  // HUD switch
+  document.getElementById('menu-btn').style.display='block';
+  showOutcome('','','');
+  updateHUD();
+
+  // Brief "CPU SHOOTING" intro then fire first shot
+  setCommentator('Now the CPU shoots!', 120);
+  setTimeout(()=> fireCpuShot(), 2000);
+}
+
+function fireCpuShot(){
+  if(cpuShotIndex >= MAX_SHOTS){
+    endMatch();
+    return;
+  }
+
+  const o = cpuShotQueue[cpuShotIndex];
+  cpuShotIndex++;
+  cpuCurrentShot = { outcome: o };
+  state = 'cpu_shooting';
+
+  // Trigger ball animation for CPU (no player input needed)
+  windStrength   = (Math.random()*2-1)*0.8;
+  netBulgeTimer  = 0;
+  ballTrail      = [];
+  divotMark      = { x: W/2+(Math.random()-0.5)*8, y: H*0.72 };
+  gkAnim         = null;  // set below
+
+  // Target inside goal for goals, edge for saves/post/miss
+  let tx, ty;
+  const lx = W*0.32, rx = W*0.68;
+  if(o==='goal'){
+    tx = lx + Math.random()*(rx-lx);
+    ty = H*0.30 + Math.random()*H*0.17;
+    gkAnim = { phase:'ready', dir: Math.random()<0.5?1:-1, frameCount:0, outcome:'wrongdive' };
+  } else if(o==='save'){
+    tx = lx + Math.random()*(rx-lx);
+    ty = H*0.31 + Math.random()*H*0.16;
+    const dd = tx<W/2?-1:1;
+    gkAnim = { phase:'ready', dir:dd, frameCount:0, outcome:'catch' };
+  } else if(o==='post'){
+    tx = Math.random()<0.5 ? W*0.305 : W*0.695;
+    ty = H*0.30 + Math.random()*0.08*H;
+    gkAnim = { phase:'ready', dir:0, frameCount:0, outcome:'post' };
+  } else {
+    tx = Math.random()<0.5 ? W*0.12 : W*0.88;
+    ty = H*0.08 + Math.random()*H*0.1;
+    gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'watch' };
+  }
+
+  const dur = (o==='miss') ? 68 : 44;
+  ballAnim = {
+    sx:W/2, sy:H*0.68, tx, ty,
+    t:0, dur, power:0.8,
+    outcome:o, curveDir:Math.random()<0.15?(Math.random()<0.5?1:-1):0,
+    spin:0
+  };
+
+  playSound('kick');
+  setTimeout(()=>playSound('whoosh'), 80);
+
+  // CPU shot commentator
+  const cpuLines = {
+    goal: ["CPU fires in!","No stopping that!","Keeper had no chance!"],
+    save: ["Keeper saves!","The keeper dives! Saved!","Brilliant stop!"],
+    post: ["Off the post! Lucky!","The post denies the CPU!","So close for the CPU!"],
+    miss: ["CPU blazes over!","Wide! What a miss!","CPU shoots straight at row Z!"]
+  };
+  const lines = cpuLines[o]||["CPU shoots..."];
+  setCommentator(lines[Math.floor(Math.random()*lines.length)], 130);
+}
+
+function resolveCpuShot(){
+  // Called when CPU ball animation ends
+  const o = cpuCurrentShot ? cpuCurrentShot.outcome : 'miss';
+
+  if(o==='goal'){
+    cpuScore++;
+    crowdCheerLevel = 0.5;
+    spawnGoalParticles();
+    triggerShake(8,18);
+    netBulgeTimer = 1;
+    crowdMode='save'; crowdModeTimer=160; // "save" crowd = opposition cheers
+    playSound('goal');
+  } else if(o==='save'){
+    triggerShake(3,8);
+    freezeFrames=4;
+    crowdMode='goal'; crowdModeTimer=120;
+    playSound('save');
+  } else if(o==='post'){
+    triggerShake(5,10);
+    freezeFrames=5;
+    crowdMode='post'; crowdModeTimer=90;
+    playSound('post');
+  } else {
+    crowdMode='miss'; crowdModeTimer=100;
+    playSound('miss');
+  }
+
+  cpuShotHistory.push({ shot: cpuShotIndex, outcome: o });
+
+  // Show outcome text
+  const cpuIcons={ goal:'CPU SCORES! 😱', save:'🧤 KEEPER SAVES!', post:'POST! 😅', miss:'CPU MISSES! 😤' };
+  const el = document.getElementById('outcome-text');
+  el.textContent = cpuIcons[o] || o.toUpperCase();
+  el.style.opacity = '1';
+  const cols={ goal:'#ff4444', save:'#00ff88', post:'#ffffff', miss:'#00ff88' };
+  el.style.color = cols[o]||'#fff';
+  el.style.textShadow = `0 0 20px ${cols[o]||'#fff'}, 3px 3px 0 #000`;
+  el.style.fontSize = '22px';
+
+  state = 'cpu_result';
+  updateHUD();
+
+  // Advance to next CPU shot
+  setTimeout(()=>{
+    el.style.opacity='0';
+    ballAnim=null; ballTrail=[];
+    freezeFrames=0; netBulgeTimer=0;
+    divotMark=null;
+    gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
+    if(cpuShotIndex >= MAX_SHOTS){
+      setTimeout(()=> endMatch(), 600);
+    } else {
+      setTimeout(()=> fireCpuShot(), 1000);
+    }
+  }, 1800);
+}
+
+function endMatch(){
+  state = 'gameover';
+  matchResult = score>cpuScore?'win':score<cpuScore?'lose':'draw';
+  const el=document.getElementById('outcome-text');
+  el.style.opacity='0';
+  document.getElementById('gameover-btns').style.display='flex';
+  document.getElementById('menu-btn').style.display='none';
+
+  if(matchResult==='win'){
+    playSound('goal');
+    triggerShake(10,25);
+    spawnGoalParticles();
+    setTimeout(()=>spawnGoalParticles(),300);
+    crowdMode='goal'; crowdModeTimer=300;
+  } else if(matchResult==='lose'){
+    playSound('miss');
+    crowdMode='miss'; crowdModeTimer=200;
+  } else {
+    playSound('post');
+  }
+  updateHUD();
+}
 function spawnGoalParticles(){
   const colors=['#ff0','#f0f','#0ff','#0f0','#f80','#fff','#f44'];
   for(let i=0;i<80;i++){
@@ -1929,7 +2309,11 @@ function drawBall(){
     if(outcome==='post') spawnPostParticles(tx,ty);
     if(outcome==='save') spawnSaveParticles(tx,ty);
     ballAnim = null;
-    processResult(outcome);
+    if(state==='cpu_shooting'){
+      resolveCpuShot();
+    } else {
+      processResult(outcome);
+    }
   }
 }
 
@@ -2317,12 +2701,18 @@ function syncShootBtn(){
   if(!isMobile) return;
   if(state === 'aiming'){
     shootBtn.classList.remove('hidden');
-  } else if(state === 'result' || state === 'gameover'){
-    // Keep visible so player can tap to advance
+    shootBtn.querySelector('.btn-label').textContent = 'SHOOT';
+    shootBtn.querySelector('.btn-icon').textContent  = '⚽';
+  } else if(state === 'result'){
     shootBtn.classList.remove('hidden');
-    shootBtn.querySelector('.btn-label').textContent = state === 'gameover' ? 'RETRY' : 'NEXT';
-    shootBtn.querySelector('.btn-icon').textContent  = state === 'gameover' ? '🔄' : '▶';
-  } else if(state === 'kicking'){
+    shootBtn.querySelector('.btn-label').textContent = 'NEXT';
+    shootBtn.querySelector('.btn-icon').textContent  = '▶';
+  } else if(state === 'gameover'){
+    shootBtn.classList.remove('hidden');
+    shootBtn.querySelector('.btn-label').textContent = 'RETRY';
+    shootBtn.querySelector('.btn-icon').textContent  = '🔄';
+  } else {
+    // kicking, cpu_shooting, cpu_result, cpu_intro — hide button
     shootBtn.classList.add('hidden');
   }
 }
@@ -2386,86 +2776,143 @@ function showOutcome(text, o, zoneLabel=''){
 function drawGameover(){
   if(state!=='gameover') return;
 
-  ctx.fillStyle='rgba(0,0,0,0.82)';
+  ctx.fillStyle='rgba(0,0,0,0.88)';
   ctx.fillRect(0,0,W,H);
-
   ctx.save();
   ctx.textAlign='center';
 
-  // ── FULL TIME header ──────────────────────────────────────
-  ctx.font='20px "Press Start 2P"';
-  ctx.fillStyle='#ff0';
-  ctx.shadowColor='#ff0'; ctx.shadowBlur=18;
-  ctx.fillText('FULL TIME!', W/2, 38);
-  ctx.shadowBlur=0;
+  const outcomeIcon = { goal:'⚽ GOAL', curve:'🌀 CURVE', save:'🧤 SAVE', post:'🏛 POST', miss:'❌ MISS' };
+  const zc = { POOR:'#ff8800', GOOD:'#ffff00', PERFECT:'#00ff88', BAD:'#ff4444' };
 
-  // Score + difficulty badge
-  ctx.font='9px "Press Start 2P"';
-  ctx.fillStyle='#fff';
-  ctx.fillText(`GOALS: ${score} / ${totalShots}  |  COMBO: x${maxCombo}`, W/2, 60);
+  if(gameMode === '2p'){
+    // ── 2P RESULT ─────────────────────────────────────────
+    const winCol = matchResult==='p1win' ? '#4488ff'
+                 : matchResult==='p2win' ? '#ff4488' : '#aaaaaa';
+    const winTxt = matchResult==='p1win' ? 'P1 WINS! 🏆'
+                 : matchResult==='p2win' ? 'P2 WINS! 🏆' : 'DRAW! 🤝';
+    ctx.font='20px "Press Start 2P"';
+    ctx.fillStyle=winCol; ctx.shadowColor=winCol; ctx.shadowBlur=20;
+    ctx.fillText(winTxt, W/2, 34);
+    ctx.shadowBlur=0;
 
-  const dc = DIFF[difficulty].col;
-  ctx.fillStyle=dc;
-  ctx.font='7px "Press Start 2P"';
-  ctx.fillText(`[ ${DIFF[difficulty].label} MODE ]`, W/2, 76);
+    ctx.font='10px "Press Start 2P"';
+    ctx.fillStyle='#fff';
+    ctx.fillText(`P1: ${p1Score}  —  P2: ${p2Score}`, W/2, 56);
 
-  // ── Rating ────────────────────────────────────────────────
-  const rating = score>=5?'LEGEND 🏆':score>=4?'WORLD CLASS':score>=3?'GREAT PLAYER':score>=2?'DECENT SHOT':score>=1?'NEEDS PRACTICE':'MISSED THE NET';
-  ctx.fillStyle='#0ff';
-  ctx.font='8px "Press Start 2P"';
-  ctx.fillText(rating, W/2, 94);
+    // Panel
+    const panelTop=68, panelH=210;
+    ctx.fillStyle='rgba(0,10,30,0.75)';
+    ctx.fillRect(14, panelTop, W-28, panelH);
+    ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=1;
+    ctx.strokeRect(14, panelTop, W-28, panelH);
 
-  // ── Replay summary ────────────────────────────────────────
-  ctx.font='7px "Press Start 2P"';
-  ctx.textAlign='left';
-
-  // Panel background
-  ctx.fillStyle='rgba(0,20,40,0.7)';
-  ctx.fillRect(28, 104, W-56, 188);
-  ctx.strokeStyle='rgba(0,200,255,0.3)';
-  ctx.lineWidth=1;
-  ctx.strokeRect(28, 104, W-56, 188);
-
-  // Header row
-  ctx.fillStyle='rgba(0,200,255,0.7)';
-  ctx.fillText('SHOT', 38, 120);
-  ctx.fillText('POWER', 100, 120);
-  ctx.fillText('RESULT', 220, 120);
-  ctx.fillStyle='rgba(255,255,255,0.25)';
-  ctx.fillRect(28, 123, W-56, 1);
-
-  const outcomeIcon = { goal:'⚽ GOAL', curve:'🌀 CURVE', save:'🧤 SAVED', post:'🏛 POST', miss:'❌ MISS' };
-  const zoneCol     = { POOR:'#ff8800', GOOD:'#ffff00', PERFECT:'#00ff88', BAD:'#ff4444' };
-
-  shotHistory.forEach((h, i) => {
-    const rowY = 140 + i * 30;
-    // Row highlight for goals
-    if(h.outcome==='goal'||h.outcome==='curve'){
-      ctx.fillStyle='rgba(0,255,100,0.07)';
-      ctx.fillRect(28, rowY-12, W-56, 26);
-    }
-    // Shot number
-    ctx.fillStyle='#aaa';
-    ctx.fillText(`#${h.shot}`, 38, rowY);
-    // Zone pill
-    ctx.fillStyle = zoneCol[h.zone] || '#fff';
-    ctx.fillRect(95, rowY-10, 70, 14);
-    ctx.fillStyle = '#000';
+    // Column headers
     ctx.font='6px "Press Start 2P"';
-    ctx.textAlign='center';
-    ctx.fillText(h.zone, 130, rowY);
-    ctx.font='7px "Press Start 2P"';
-    ctx.textAlign='left';
-    // Outcome
-    const isGood = h.outcome==='goal'||h.outcome==='curve';
-    ctx.fillStyle = isGood ? '#00ff88' : h.outcome==='save'||h.outcome==='post' ? '#ff8800' : '#ff4444';
-    ctx.fillText(outcomeIcon[h.outcome]||h.outcome, 178, rowY);
-  });
+    ctx.fillStyle='#4488ff'; ctx.textAlign='center';
+    ctx.fillText('PLAYER 1', W*0.27, panelTop+13);
+    ctx.fillStyle='#ff4488';
+    ctx.fillText('PLAYER 2', W*0.75, panelTop+13);
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.fillRect(W/2-0.5, panelTop+2, 1, panelH-4);
+    ctx.fillRect(14, panelTop+17, W-28, 1);
 
-  // ── Trophy ────────────────────────────────────────────────
-  if(score>=4) drawTrophy(W/2, 334);
+    for(let i=0;i<5;i++){
+      const rowY = panelTop+30+i*34;
 
-  // Buttons are shown via HTML overlay (#gameover-btns) — no canvas text needed
+      // P1 shot
+      const ph = p1History[i];
+      if(ph){
+        const good = ph.outcome==='goal'||ph.outcome==='curve';
+        if(good){ ctx.fillStyle='rgba(68,136,255,0.10)'; ctx.fillRect(15,rowY-12,W/2-16,28); }
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle='#555'; ctx.fillText(`#${i+1}`, 22, rowY);
+        ctx.fillStyle=zc[ph.zone]||'#888'; ctx.fillRect(36,rowY-9,44,12);
+        ctx.fillStyle='#000'; ctx.font='4px "Press Start 2P"'; ctx.textAlign='center';
+        ctx.fillText(ph.zone, 58, rowY);
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle=good?'#00ff88':'#ff6644';
+        ctx.fillText(outcomeIcon[ph.outcome]||ph.outcome, 84, rowY);
+      }
+
+      // P2 shot
+      const ch = p2History[i];
+      if(ch){
+        const good = ch.outcome==='goal'||ch.outcome==='curve';
+        if(good){ ctx.fillStyle='rgba(255,68,136,0.10)'; ctx.fillRect(W/2+1,rowY-12,W/2-15,28); }
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle='#555'; ctx.fillText(`#${i+1}`, W/2+8, rowY);
+        ctx.fillStyle=zc[ch.zone]||'#888'; ctx.fillRect(W/2+22,rowY-9,44,12);
+        ctx.fillStyle='#000'; ctx.font='4px "Press Start 2P"'; ctx.textAlign='center';
+        ctx.fillText(ch.zone, W/2+44, rowY);
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle=good?'#00ff88':'#ff6644';
+        ctx.fillText(outcomeIcon[ch.outcome]||ch.outcome, W/2+70, rowY);
+      }
+    }
+    if(matchResult!=='draw') drawTrophy(W/2, 322);
+
+  } else {
+    // ── VS CPU RESULT ────────────────────────────────────────
+    const bannerCol = matchResult==='win'?'#ffd700': matchResult==='lose'?'#ff4444':'#aaaaaa';
+    const bannerTxt = matchResult==='win'?'YOU WIN! 🏆': matchResult==='lose'?'YOU LOSE 😢':'DRAW! 🤝';
+    ctx.font='20px "Press Start 2P"';
+    ctx.fillStyle=bannerCol; ctx.shadowColor=bannerCol; ctx.shadowBlur=20;
+    ctx.fillText(bannerTxt, W/2, 34);
+    ctx.shadowBlur=0;
+
+    ctx.font='10px "Press Start 2P"';
+    ctx.fillStyle='#fff';
+    ctx.fillText(`YOU  ${score} — ${cpuScore}  CPU`, W/2, 56);
+
+    ctx.font='6px "Press Start 2P"';
+    ctx.fillStyle=DIFF[difficulty].col;
+    ctx.fillText(`[ ${DIFF[difficulty].label} ]  COMBO x${maxCombo}`, W/2, 72);
+
+    const panelTop=82, panelH=198;
+    ctx.fillStyle='rgba(0,15,35,0.75)';
+    ctx.fillRect(14, panelTop, W-28, panelH);
+    ctx.strokeStyle='rgba(0,200,255,0.25)'; ctx.lineWidth=1;
+    ctx.strokeRect(14, panelTop, W-28, panelH);
+
+    ctx.font='6px "Press Start 2P"';
+    ctx.fillStyle='#0cf'; ctx.textAlign='center';
+    ctx.fillText('YOUR SHOTS', W*0.27, panelTop+13);
+    ctx.fillStyle='#f66';
+    ctx.fillText('CPU SHOTS', W*0.75, panelTop+13);
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.fillRect(W/2-0.5, panelTop+2, 1, panelH-4);
+    ctx.fillRect(14, panelTop+17, W-28, 1);
+
+    const cpuIcon = { goal:'⚽ SCORED', save:'🧤 SAVED', post:'🏛 POST', miss:'❌ MISS' };
+
+    for(let i=0;i<5;i++){
+      const rowY = panelTop+30+i*32;
+      const ph = shotHistory[i];
+      if(ph){
+        const good=ph.outcome==='goal'||ph.outcome==='curve';
+        if(good){ ctx.fillStyle='rgba(0,255,100,0.08)'; ctx.fillRect(15,rowY-11,W/2-16,26); }
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle='#666'; ctx.fillText(`#${i+1}`, 22, rowY);
+        ctx.fillStyle=zc[ph.zone]||'#888'; ctx.fillRect(36,rowY-9,44,12);
+        ctx.fillStyle='#000'; ctx.font='4px "Press Start 2P"'; ctx.textAlign='center';
+        ctx.fillText(ph.zone, 58, rowY);
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle=good?'#00ff88':'#ff6644';
+        ctx.fillText(outcomeIcon[ph.outcome]||ph.outcome, 84, rowY);
+      }
+      const ch = cpuShotHistory[i];
+      if(ch){
+        const good=ch.outcome==='goal';
+        if(good){ ctx.fillStyle='rgba(255,60,60,0.08)'; ctx.fillRect(W/2+1,rowY-11,W/2-15,26); }
+        ctx.font='5px "Press Start 2P"'; ctx.textAlign='left';
+        ctx.fillStyle='#666'; ctx.fillText(`#${i+1}`, W/2+8, rowY);
+        ctx.fillStyle=good?'#ff4444':'#00cc66';
+        ctx.fillText(cpuIcon[ch.outcome]||ch.outcome, W/2+26, rowY);
+      }
+    }
+    if(matchResult==='win') drawTrophy(W/2, 318);
+  }
+
   ctx.restore();
 }
 
@@ -2486,16 +2933,30 @@ function drawTrophy(x,y){
 }
 
 function drawVignette(){
-  // Base vignette
   const v=ctx.createRadialGradient(W/2,H/2,W*0.3,W/2,H/2,W*0.75);
   v.addColorStop(0,'transparent');
   v.addColorStop(1,'rgba(0,0,0,0.5)');
   ctx.fillStyle=v;
   ctx.fillRect(0,0,W,H);
 
+  // ── 2P player colour tint ─────────────────────────────────
+  if(gameMode==='2p' && (state==='aiming'||state==='kicking'||state==='result')){
+    ctx.fillStyle = activePlayer===1 ? 'rgba(60,120,255,0.10)' : 'rgba(255,60,120,0.10)';
+    ctx.fillRect(0,0,W,H);
+    // Corner player tag
+    const tagCol = activePlayer===1 ? '#4488ff' : '#ff4488';
+    ctx.fillStyle = tagCol;
+    ctx.font = '7px "Press Start 2P"';
+    ctx.textAlign = 'right';
+    ctx.shadowColor = tagCol; ctx.shadowBlur = 8;
+    ctx.fillText(`P${activePlayer}`, W-10, H-10);
+    ctx.shadowBlur = 0;
+    ctx.textAlign = 'center';
+  }
+
   // ── Hot streak pulse (combo ≥ 2) ─────────────────────────
   if(combo >= 2){
-    const intensity = Math.min((combo - 1) / 3, 1); // ramps up with combo
+    const intensity = Math.min((combo - 1) / 3, 1);
     const pulse = (Math.sin(streakPulse) * 0.5 + 0.5) * intensity;
     const sv = ctx.createRadialGradient(W/2,H/2,W*0.2,W/2,H/2,W*0.78);
     sv.addColorStop(0,'transparent');
@@ -2504,7 +2965,6 @@ function drawVignette(){
     ctx.fillStyle=sv;
     ctx.fillRect(0,0,W,H);
 
-    // Streak badge — top right corner
     const badgeAlpha = 0.7 + 0.3*Math.sin(streakPulse*1.5);
     ctx.save();
     ctx.globalAlpha = badgeAlpha;
@@ -2730,6 +3190,36 @@ function drawWindFlag(){
   ctx.fillText(strLabel, fx+32, flagY+8);
 }
 
+function drawCpuIntro(){
+  if(state!=='cpu_intro') return;
+  ctx.fillStyle='rgba(0,0,0,0.72)';
+  ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.textAlign='center';
+  // Pulsing panel
+  const pulse = 0.85 + 0.15*Math.sin(frame*0.15);
+  ctx.fillStyle=`rgba(20,0,0,${pulse*0.9})`;
+  ctx.fillRect(60,H*0.3,W-120,H*0.4);
+  ctx.strokeStyle=`rgba(255,60,60,${pulse*0.8})`;
+  ctx.lineWidth=2; ctx.strokeRect(60,H*0.3,W-120,H*0.4);
+
+  ctx.font='14px "Press Start 2P"';
+  ctx.fillStyle='#ff4444';
+  ctx.shadowColor='#ff0000'; ctx.shadowBlur=16;
+  ctx.fillText('CPU TURN', W/2, H*0.42);
+  ctx.shadowBlur=0;
+
+  ctx.font='8px "Press Start 2P"';
+  ctx.fillStyle='#fff';
+  ctx.fillText(`YOU: ${score}  —  CPU: ${cpuScore}`, W/2, H*0.52);
+
+  ctx.font='6px "Press Start 2P"';
+  ctx.fillStyle='rgba(255,200,200,0.7)';
+  const b=Math.floor(frame/18)%2===0;
+  if(b) ctx.fillText('HOLD YOUR BREATH...', W/2, H*0.62);
+  ctx.restore();
+}
+
 function render(){
   ctx.save();
   ctx.translate(px(shake.x), py(shake.y));
@@ -2754,6 +3244,7 @@ function render(){
   drawCommentator();
   drawVignette();
   drawFlicker();
+  drawCpuIntro();
 
   if(state==='gameover') drawGameover();
 
