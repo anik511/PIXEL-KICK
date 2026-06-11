@@ -330,6 +330,31 @@
     white-space: nowrap;
   }
 
+  /* ── Big START button on title screen ──────────────────── */
+  #start-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 14px 28px;
+    margin-top: 8px;
+    background: radial-gradient(ellipse at 40% 35%, #00cc44, #006622);
+    border: 3px solid #00ff66;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    letter-spacing: 2px;
+    touch-action: manipulation;
+    box-shadow: 0 5px 0 #003311, 0 0 22px rgba(0,255,80,0.45);
+    animation: startPulse 1.2s ease-in-out infinite alternate;
+  }
+  #start-btn:hover, #start-btn:active {
+    transform: translateY(3px);
+    box-shadow: 0 2px 0 #003311, 0 0 32px rgba(0,255,80,0.7);
+  }
+  @keyframes startPulse {
+    from { box-shadow: 0 5px 0 #003311, 0 0 14px rgba(0,255,80,0.35); }
+    to   { box-shadow: 0 5px 0 #003311, 0 0 30px rgba(0,255,80,0.70); }
+  }
+
   /* ── Mobile shoot button ─────────────────────────────── */
   #shoot-btn {
     display: none; /* shown only on touch devices via JS */
@@ -415,6 +440,12 @@
         HOLD SPACE → CHARGE<br>
         RELEASE → SHOOT
       </div>
+
+      <!-- Big start button — always visible, especially important on mobile -->
+      <button id="start-btn" onclick="startGame()">
+        ⚽ START GAME
+      </button>
+
       <div style="margin-top:4px;font-family:'VT323',monospace;font-size:13px;color:#555;">HI-SCORE: 9999</div>
     </div>
 
