@@ -537,7 +537,13 @@ let p1Score      = 0;
 let p2Score      = 0;
 let p1History    = [];
 let p2History    = [];
-const P_COL      = { 1:'#4488ff', 2:'#ff4488' };
+// Brazil = P1: yellow shirt, blue shorts, green socks
+// Argentina = P2: light blue & white stripes
+const TEAMS = {
+  1: { name:'BRAZIL',    shortName:'BRA', shirtCol:'#f7d02c', shortsCol:'#003da5', socksCol:'#009c3b', numCol:'#003da5', vignette:'rgba(247,208,44,0.10)', tagCol:'#f7d02c'  },
+  2: { name:'ARGENTINA', shortName:'ARG', shirtCol:'#74b9e0', shortsCol:'#ffffff', socksCol:'#74b9e0', numCol:'#002060', vignette:'rgba(116,185,224,0.10)', tagCol:'#74b9e0' },
+};
+const P_COL = { 1: TEAMS[1].tagCol, 2: TEAMS[2].tagCol };
 
 function setDifficulty(d){
   difficulty = d;
@@ -689,8 +695,50 @@ let windAngle    = 0;
 let crowdMode    = 'idle';
 let crowdModeTimer = 0;
 
-// ── Feature: Shot history (for replay summary) ─────────────
-let shotHistory = []; // [{shot, zone, outcome}]
+// ── Feature: GK Personality ───────────────────────────────
+// Unlocked by difficulty: easy=Reckless, normal=Reader, hard=Giant
+const GK_TYPES = {
+  reckless: {
+    label:       'RECKLESS',
+    col:         '#ff6600',
+    readyFrames:  5,   // dives early — easy to chip
+    pushFrames:   4,
+    diveFrames:  18,
+    armMult:     0.85, // shorter arm reach
+    scaleMult:   1.00, // normal size
+    idleSway:   14,    // wide frantic sway
+  },
+  reader: {
+    label:       'READER',
+    col:         '#ffff00',
+    readyFrames: 10,   // waits — harder to place
+    pushFrames:   7,
+    diveFrames:  22,
+    armMult:     1.00,
+    scaleMult:   1.00,
+    idleSway:    9,
+  },
+  giant: {
+    label:       'GIANT',
+    col:         '#00aaff',
+    readyFrames: 16,   // slow to commit
+    pushFrames:  10,
+    diveFrames:  28,
+    armMult:     1.45, // huge reach
+    scaleMult:   1.30, // visually bigger
+    idleSway:    6,
+  },
+};
+// Maps difficulty → GK type
+const DIFF_GK = { easy:'reckless', normal:'reader', hard:'giant' };
+
+// ── Feature: Aim Shake ────────────────────────────────────
+let aimShakeTime = 0;  // oscillator, advances each frame during aiming
+
+// ── Feature: Dynamic Wind ─────────────────────────────────
+// windStrength already exists — we'll scale it per aim height in drawBall
+// aimWindPush is the visual nudge shown on crosshair while charging
+let aimWindPush = 0;
 
 // ── Feature: Hot streak visual ────────────────────────────
 let streakPulse = 0;
@@ -989,6 +1037,8 @@ function initGame(){
   crowdMode='idle'; crowdModeTimer=0;
   shotHistory=[];
   streakPulse=0;
+  aimShakeTime=0;
+  aimWindPush=0;
   document.getElementById('title-screen').style.display='none';
   document.getElementById('gameover-btns').style.display='none';
   document.getElementById('p2-intro-overlay').style.display='none';
@@ -1008,6 +1058,7 @@ function nextShot(){
   divotMark=null;
   netBulgeTimer=0;
   commentatorLine=''; commentatorTimer=0;
+  aimWindPush=0;
   gkAnim = { phase:'idle', dir:0, frameCount:0, outcome:'' };
   chargeLevel=0;
   isCharging=false;
@@ -1305,10 +1356,10 @@ function updateHUD(){
   const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if(state==='aiming'){
     if(gameMode==='2p'){
-      const pLabel = `P${activePlayer}`;
-      const pOther = activePlayer===1 ? '' : `  P1: ${p1Score}`;
+      const team   = TEAMS[activePlayer] || TEAMS[1];
+      const pOther = activePlayer===1 ? '' : `  ${TEAMS[1].shortName}: ${p1Score}`;
       document.getElementById('scoreDisplay').textContent =
-        `${pLabel} SHOT ${totalShots+1}/5${pOther}`;
+        `${team.shortName} SHOT ${totalShots+1}/5${pOther}`;
     } else {
       document.getElementById('scoreDisplay').textContent =
         `YOU: ${score}  CPU: ${cpuScore}  |  SHOT ${totalShots+1}/5`;
@@ -1322,12 +1373,12 @@ function updateHUD(){
       `YOU: ${score}  CPU: ${cpuScore}  |  CPU SHOT ${cpuShotIndex}/5`;
     document.getElementById('shotsDisplay').textContent = '⚡ CPU IS SHOOTING...';
   } else if(state==='p2_intro'){
-    document.getElementById('scoreDisplay').textContent = `P1: ${p1Score} goals`;
-    document.getElementById('shotsDisplay').textContent = 'PASS TO PLAYER 2';
+    document.getElementById('scoreDisplay').textContent = `${TEAMS[1].shortName}: ${p1Score} goals`;
+    document.getElementById('shotsDisplay').textContent = `PASS TO ${TEAMS[2].name}`;
   } else if(state==='gameover'){
     if(gameMode==='2p'){
       document.getElementById('scoreDisplay').textContent =
-        `FINAL: P1 ${p1Score} — ${p2Score} P2`;
+        `${TEAMS[1].shortName} ${p1Score} — ${p2Score} ${TEAMS[2].shortName}`;
     } else {
       document.getElementById('scoreDisplay').textContent =
         `FINAL: YOU ${score} — ${cpuScore} CPU`;
@@ -1335,8 +1386,8 @@ function updateHUD(){
     document.getElementById('shotsDisplay').textContent='';
   } else {
     if(gameMode==='2p'){
-      document.getElementById('scoreDisplay').textContent =
-        `P${activePlayer} SHOOTING...`;
+      const team = TEAMS[activePlayer] || TEAMS[1];
+      document.getElementById('scoreDisplay').textContent = `${team.name} SHOOTING...`;
     } else {
       document.getElementById('scoreDisplay').textContent =
         `YOU: ${score}  CPU: ${cpuScore}`;
@@ -1347,14 +1398,18 @@ function updateHUD(){
 
 // ─── 2-PLAYER HANDOFF ─────────────────────────────────────
 function showP2Intro(){
-  p1Score = score;   // lock in P1 score
+  p1Score = score;
   state   = 'p2_intro';
-  // Update score line in overlay
   document.getElementById('p2-score-line').textContent =
-    `P1 scored ${p1Score} / ${MAX_SHOTS}`;
+    `${TEAMS[1].name} scored ${p1Score} / ${MAX_SHOTS}`;
   const overlay = document.getElementById('p2-intro-overlay');
+  // Update P2 title text dynamically
+  const titles = overlay.querySelectorAll('.p2-title');
+  if(titles[0]) titles[0].textContent = TEAMS[2].name;
+  if(titles[1]) titles[1].textContent = 'YOUR TURN!';
+  const startBtn = document.getElementById('p2-start-btn');
+  if(startBtn) startBtn.textContent = `▶ ${TEAMS[2].shortName} START`;
   overlay.style.display = 'flex';
-  // Hide shoot button during handoff
   shootBtn.classList.add('hidden');
   updateHUD();
 }
@@ -1376,7 +1431,7 @@ function startP2Turn(){
   showOutcome('','','');
   state = 'aiming';
   updateHUD();
-  setCommentator('Player 2 — your turn!', 100);
+  setCommentator(`${TEAMS[2].name} — your turn!`, 100);
 }
 
 function endMatch2P(){
@@ -1956,10 +2011,15 @@ function drawGoalkeeper(){
   let catchPose   = false;
   let deflectPose = false;
 
-  // ── IDLE — side-to-side sway, always shown ─────────────────
+  // ── GK personality based on difficulty ───────────────────
+  const gkType  = GK_TYPES[DIFF_GK[difficulty]] || GK_TYPES.reader;
+  const armMult = gkType.armMult;
+  const scaleMult = gkType.scaleMult;
+
+  // ── IDLE ──────────────────────────────────────────────────
   if(phase === 'idle'){
     const sw = Math.sin(frame * 0.055);
-    dx = sw * 11;
+    dx = sw * gkType.idleSway;
     dy = -Math.abs(Math.sin(frame * 0.11)) * 4;
     armRaiseL = 0.40 + sw * 0.18;
     armRaiseR = 0.40 - sw * 0.18;
@@ -1979,13 +2039,13 @@ function drawGoalkeeper(){
 
   // ── READY — anticipation crouch ────────────────────────────
   if(phase === 'ready'){
-    const t = Math.min(fc / 10, 1);
+    const t = Math.min(fc / gkType.readyFrames, 1);
     crouchY   = t * 10;
     legSpread = 9 + t * 7;
     dx = Math.sin(frame * 0.07) * (1 - t) * 10;
     armRaiseL = 0.45 + t * 0.35;
     armRaiseR = 0.45 + t * 0.35;
-    if(fc >= 10){
+    if(fc >= gkType.readyFrames){
       gkAnim.phase = 'pushoff';
       gkAnim.frameCount = 0;
     }
@@ -1993,84 +2053,84 @@ function drawGoalkeeper(){
 
   // ── PUSHOFF — explosive first step ─────────────────────────
   if(phase === 'pushoff'){
-    const t = Math.min(fc / 7, 1);
+    const t = Math.min(fc / gkType.pushFrames, 1);
     const e = t * t;
     dx = dir * e * 22;
     dy = -e * 17;
     crouchY = (1 - t) * 10;
     rot = dir * e * 0.30;
-    armRaiseL = dir < 0 ? 0.9 + e * 0.95 : 0.35;
-    armRaiseR = dir > 0 ? 0.9 + e * 0.95 : 0.35;
+    armRaiseL = dir < 0 ? 0.9 + e * 0.95 * armMult : 0.35;
+    armRaiseR = dir > 0 ? 0.9 + e * 0.95 * armMult : 0.35;
     legSpread = 13 + t * 9;
-    if(fc >= 7){
-      if(gkOut === 'catch')   { gkAnim.phase = 'dive_catch';   gkAnim.frameCount = 0; }
+    if(fc >= gkType.pushFrames){
+      if(gkOut === 'catch')        { gkAnim.phase = 'dive_catch';   gkAnim.frameCount = 0; }
       else if(gkOut === 'deflect') { gkAnim.phase = 'dive_deflect'; gkAnim.frameCount = 0; }
-      else                    { gkAnim.phase = 'dive';          gkAnim.frameCount = 0; }
+      else                         { gkAnim.phase = 'dive';          gkAnim.frameCount = 0; }
     }
   }
 
   // ── DIVE — standard dive (wrong way / post) ────────────────
   if(phase === 'dive'){
-    const t  = Math.min(fc / 22, 1);
+    const t  = Math.min(fc / gkType.diveFrames, 1);
     const eo = 1 - Math.pow(1 - t, 3);
     dx  = dir * (22 + eo * 80);
     dy  = -17 + eo * 34;
     rot = dir * (0.30 + eo * 1.0);
-    armRaiseL = dir < 0 ? 1.75 : 0.22;
-    armRaiseR = dir > 0 ? 1.75 : 0.22;
+    armRaiseL = dir < 0 ? 1.75 * armMult : 0.22;
+    armRaiseR = dir > 0 ? 1.75 * armMult : 0.22;
     legSpread = 18 + eo * 15;
-    if(fc >= 22){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
+    if(fc >= gkType.diveFrames){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
   }
 
-  // ── DIVE_CATCH — reach and cup both hands around ball ──────
+  // ── DIVE_CATCH ─────────────────────────────────────────────
   if(phase === 'dive_catch'){
-    const t  = Math.min(fc / 20, 1);
+    const t  = Math.min(fc / (gkType.diveFrames - 2), 1);
     const eo = 1 - Math.pow(1 - t, 2);
     dx  = dir * (22 + eo * 62);
     dy  = -17 + eo * 18;
     rot = dir * (0.30 + eo * 0.70);
     if(dir < 0){
-      armRaiseL = 0.85 + eo * 1.05;   // lead arm extends to ball
-      armRaiseR = 0.55 + eo * 0.80;   // trail arm wraps behind
+      armRaiseL = (0.85 + eo * 1.05) * armMult;
+      armRaiseR = (0.55 + eo * 0.80) * armMult;
     } else {
-      armRaiseR = 0.85 + eo * 1.05;
-      armRaiseL = 0.55 + eo * 0.80;
+      armRaiseR = (0.85 + eo * 1.05) * armMult;
+      armRaiseL = (0.55 + eo * 0.80) * armMult;
     }
     legSpread = 17 + eo * 11;
     catchPose = t > 0.55;
-    if(fc >= 20){ gkAnim.phase = 'hold'; gkAnim.frameCount = 0; }
+    if(fc >= gkType.diveFrames - 2){ gkAnim.phase = 'hold'; gkAnim.frameCount = 0; }
   }
 
-  // ── HOLD — clutching ball to chest after catch ─────────────
+  // ── HOLD ──────────────────────────────────────────────────
   if(phase === 'hold'){
     const t = Math.min(fc / 16, 1);
     dx  = dir * (84 - t * 8);
     dy  = 3 + t * 8;
     rot = dir * (1.0 - t * 0.40);
-    armRaiseL = 1.55 - t * 0.45;
-    armRaiseR = 1.55 - t * 0.45;
+    armRaiseL = (1.55 - t * 0.45) * armMult;
+    armRaiseR = (1.55 - t * 0.45) * armMult;
     legSpread = 28 - t * 8;
     catchPose = true;
     if(fc >= 16){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
   }
 
-  // ── DIVE_DEFLECT — full stretch, one arm vertical, fingertip ─
+  // ── DIVE_DEFLECT ───────────────────────────────────────────
   if(phase === 'dive_deflect'){
-    const t  = Math.min(fc / 22, 1);
+    const t  = Math.min(fc / gkType.diveFrames, 1);
     const eo = 1 - Math.pow(1 - t, 2);
     dx  = dir * (22 + eo * 72);
-    dy  = -22 + eo * 14;           // stays high — fingertip over bar
+    dy  = -22 + eo * 14;
     rot = dir * (0.26 + eo * 0.80);
     if(dir < 0){
-      armRaiseL = 0.95 + eo * 1.65;  // nearly straight up
-      armRaiseR = 0.30 + eo * 0.40;
+      armRaiseL = (0.95 + eo * 1.65) * armMult;
+      armRaiseR = (0.30 + eo * 0.40);
     } else {
-      armRaiseR = 0.95 + eo * 1.65;
-      armRaiseL = 0.30 + eo * 0.40;
+      armRaiseR = (0.95 + eo * 1.65) * armMult;
+      armRaiseL = (0.30 + eo * 0.40);
     }
     legSpread = 19 + eo * 17;
     deflectPose = t > 0.5;
-    if(fc >= 22){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
+    if(fc >= gkType.diveFrames){ gkAnim.phase = 'land'; gkAnim.frameCount = 0; }
   }
 
   // ── LAND — hit the turf ────────────────────────────────────
@@ -2107,6 +2167,8 @@ function drawGoalkeeper(){
   ctx.save();
   ctx.translate(px(baseX + dx), py(baseY + dy + crouchY));
   ctx.rotate(rot);
+  // Giant GK is visually larger
+  if(scaleMult !== 1.0) ctx.scale(scaleMult, scaleMult);
 
   const gc      = '#ff6600';
   const gcd     = '#cc4400';
@@ -2287,8 +2349,15 @@ function drawBall(){
   const prog  = Math.min(t/dur, 1);
   const ease  = prog<0.5 ? 2*prog*prog : 1-Math.pow(-2*prog+2,2)/2;
 
+  // ── Dynamic wind — scales by aim height in goal ───────────
+  // Aimed at crossbar (+40% wind), aimed at ground (-60% wind)
+  const GOAL_TOP_W = H * 0.27, GOAL_BOT_W = H * 0.50;
+  const aimNormW   = Math.max(0, Math.min(1,
+    (ballAnim.ty - GOAL_TOP_W) / (GOAL_BOT_W - GOAL_TOP_W)));
+  const windScalar = 1.4 - aimNormW * 2.0; // +1.4 (top) → -0.6 (bottom)
+
   const curvePush = curveDir * Math.sin(prog*Math.PI) * 60
-                  + windStrength * Math.sin(prog*Math.PI) * 28;
+                  + windStrength * windScalar * Math.sin(prog*Math.PI) * 28;
   const bx = sx + (tx-sx)*ease + curvePush;
 
   // ── Arc height varies with aim position in goal ───────────
@@ -2481,17 +2550,32 @@ function drawLeg(x, y, angle, side){
   ctx.rotate(angle);
 
   // Thigh (shorts)
-  const shortCol='#001f5c';
+  // Jersey colours from active team
+  const team     = TEAMS[activePlayer] || TEAMS[1];
+  const shortCol = team.shortsCol;
   drawPixelRect(-12,-60,24,32,shortCol);
-  // Shorts stripe
-  ctx.fillStyle='#ffffff';
-  ctx.fillRect(px(-12),py(-28),24,4);
+  // Shorts stripe — team shirt colour for Brazil, blue for Argentina
+  const stripeCol = activePlayer===2 ? team.shirtCol : team.shirtCol;
+  ctx.fillStyle = stripeCol;
+  ctx.globalAlpha = 0.45;
+  ctx.fillRect(px(-12),py(-28),24,3);
+  ctx.globalAlpha = 1;
+
+  // ── Argentina: vertical shirt stripes on sock area ────────
+  if(activePlayer === 2){
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.5;
+    for(let s=-8; s<=8; s+=6){
+      ctx.fillRect(px(s), py(-60), 3, 30);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   // Knee
   drawPixelRect(-10,-30,20,8,'#e8c49a');
 
   // Shin / sock
-  const sockCol='#cc0000';
+  const sockCol = team.socksCol;
   const legY=-22;
   ctx.rotate(angle*0.4); // lower leg follows
   drawPixelRect(-9,legY,18,38,sockCol);
@@ -2584,6 +2668,43 @@ function drawAimReticle(){
     ctx.font = '6px "Press Start 2P"';
     ctx.textAlign = 'center';
     ctx.fillText('OUT OF POST!', px(x), py(y - r - 6));
+  }
+
+  // ── Pressure shake warning ─────────────────────────────────
+  const shotsGone = MAX_SHOTS - shotsLeft;
+  if(shotsGone >= 3 && state==='aiming'){
+    const warnAlpha2 = 0.5 + 0.5*Math.sin(frame*0.22);
+    ctx.fillStyle = `rgba(255,50,50,${warnAlpha2})`;
+    ctx.font = '5px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    const label = shotsLeft===1 ? '⚠ LAST SHOT!' : `⚠ ${shotsLeft} SHOTS LEFT`;
+    ctx.fillText(label, px(x), py(y + r + 22));
+  }
+
+  // ── Wind pull arrow on crosshair while charging ────────────
+  if(isCharging && Math.abs(windStrength) > 0.1){
+    const pullDir  = windStrength > 0 ? 1 : -1;
+    const pullStr  = Math.abs(windStrength);
+    const arrowLen = 8 + pullStr * 18 * chargeLevel;
+    const arrowAlpha = 0.5 + 0.4*Math.sin(frame*0.25);
+    ctx.save();
+    ctx.globalAlpha = arrowAlpha;
+    ctx.strokeStyle = windStrength > 0.4 ? '#ff6666' : windStrength < -0.4 ? '#6688ff' : '#ffdd44';
+    ctx.lineWidth = 2;
+    // Arrow shaft
+    ctx.beginPath();
+    ctx.moveTo(px(x), py(y));
+    ctx.lineTo(px(x + pullDir * arrowLen), py(y));
+    ctx.stroke();
+    // Arrow head
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath();
+    ctx.moveTo(px(x + pullDir*(arrowLen+6)), py(y));
+    ctx.lineTo(px(x + pullDir*(arrowLen)),   py(y-4));
+    ctx.lineTo(px(x + pullDir*(arrowLen)),   py(y+4));
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   // ── Charge arc — zone colour ──────────────────────────────
@@ -2710,6 +2831,22 @@ function drawPowerBar(){
   });
 }
 
+function drawGKPersonalityBadge(){
+  if(state !== 'aiming') return;
+  const gkType = GK_TYPES[DIFF_GK[difficulty]] || GK_TYPES.reader;
+  const bx = W/2, by = H*0.56;
+  ctx.save();
+  ctx.globalAlpha = 0.55 + 0.1*Math.sin(frame*0.08);
+  ctx.fillStyle = gkType.col;
+  ctx.font = '5px "Press Start 2P"';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = gkType.col; ctx.shadowBlur = 6;
+  ctx.fillText(`GK: ${gkType.label}`, bx, by);
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 function drawArrows(){
   // Only show arrow hints on non-touch devices
   const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -2817,18 +2954,18 @@ function drawGameover(){
 
   if(gameMode === '2p'){
     // ── 2P RESULT ─────────────────────────────────────────
-    const winCol = matchResult==='p1win' ? '#4488ff'
-                 : matchResult==='p2win' ? '#ff4488' : '#aaaaaa';
-    const winTxt = matchResult==='p1win' ? 'P1 WINS! 🏆'
-                 : matchResult==='p2win' ? 'P2 WINS! 🏆' : 'DRAW! 🤝';
-    ctx.font='20px "Press Start 2P"';
+    const winCol = matchResult==='p1win' ? TEAMS[1].tagCol
+                 : matchResult==='p2win' ? TEAMS[2].tagCol : '#aaaaaa';
+    const winTxt = matchResult==='p1win' ? `${TEAMS[1].name} WINS! 🏆`
+                 : matchResult==='p2win' ? `${TEAMS[2].name} WINS! 🏆` : 'DRAW! 🤝';
+    ctx.font='18px "Press Start 2P"';
     ctx.fillStyle=winCol; ctx.shadowColor=winCol; ctx.shadowBlur=20;
     ctx.fillText(winTxt, W/2, 34);
     ctx.shadowBlur=0;
 
     ctx.font='10px "Press Start 2P"';
     ctx.fillStyle='#fff';
-    ctx.fillText(`P1: ${p1Score}  —  P2: ${p2Score}`, W/2, 56);
+    ctx.fillText(`${TEAMS[1].shortName}: ${p1Score}  —  ${TEAMS[2].shortName}: ${p2Score}`, W/2, 56);
 
     // Panel
     const panelTop=68, panelH=210;
@@ -2839,10 +2976,10 @@ function drawGameover(){
 
     // Column headers
     ctx.font='6px "Press Start 2P"';
-    ctx.fillStyle='#4488ff'; ctx.textAlign='center';
-    ctx.fillText('PLAYER 1', W*0.27, panelTop+13);
-    ctx.fillStyle='#ff4488';
-    ctx.fillText('PLAYER 2', W*0.75, panelTop+13);
+    ctx.fillStyle=TEAMS[1].tagCol; ctx.textAlign='center';
+    ctx.fillText(TEAMS[1].name, W*0.27, panelTop+13);
+    ctx.fillStyle=TEAMS[2].tagCol;
+    ctx.fillText(TEAMS[2].name, W*0.75, panelTop+13);
     ctx.fillStyle='rgba(255,255,255,0.15)';
     ctx.fillRect(W/2-0.5, panelTop+2, 1, panelH-4);
     ctx.fillRect(14, panelTop+17, W-28, 1);
@@ -2972,15 +3109,14 @@ function drawVignette(){
 
   // ── 2P player colour tint ─────────────────────────────────
   if(gameMode==='2p' && (state==='aiming'||state==='kicking'||state==='result')){
-    ctx.fillStyle = activePlayer===1 ? 'rgba(60,120,255,0.10)' : 'rgba(255,60,120,0.10)';
+    const team = TEAMS[activePlayer] || TEAMS[1];
+    ctx.fillStyle = team.vignette;
     ctx.fillRect(0,0,W,H);
-    // Corner player tag
-    const tagCol = activePlayer===1 ? '#4488ff' : '#ff4488';
-    ctx.fillStyle = tagCol;
+    ctx.fillStyle = team.tagCol;
     ctx.font = '7px "Press Start 2P"';
     ctx.textAlign = 'right';
-    ctx.shadowColor = tagCol; ctx.shadowBlur = 8;
-    ctx.fillText(`P${activePlayer}`, W-10, H-10);
+    ctx.shadowColor = team.tagCol; ctx.shadowBlur = 8;
+    ctx.fillText(team.shortName, W-10, H-10);
     ctx.shadowBlur = 0;
     ctx.textAlign = 'center';
   }
@@ -3059,6 +3195,28 @@ function drawArrowKeyAim(){
     if(keys['ArrowRight']) aimX=Math.min(W-80, aimX+spd);
     if(keys['ArrowUp'])    aimY=Math.max(80, aimY-spd);
     if(keys['ArrowDown'])  aimY=Math.min(H*0.7, aimY+spd);
+
+    // ── Aim shake — increases as shots decrease ───────────────
+    const shotsGone = MAX_SHOTS - shotsLeft;  // 0..4
+    if(shotsGone >= 3){
+      // Reduced: starts later, much gentler wobble
+      const shakeIntensity = (shotsGone - 2) * 0.9; // 0.9 at 1 shot left, 1.8 at 0
+      aimShakeTime += 0.06 + shotsGone * 0.006;
+      const wobbleX = Math.sin(aimShakeTime * 2.1) * shakeIntensity;
+      const wobbleY = Math.cos(aimShakeTime * 1.7) * shakeIntensity * 0.5;
+      aimX = Math.max(50, Math.min(W-50, aimX + wobbleX));
+      aimY = Math.max(50, Math.min(H*0.7, aimY + wobbleY));
+    }
+
+    // ── Wind pull on crosshair while charging ─────────────────
+    if(isCharging){
+      // Lerp aimWindPush toward target wind displacement
+      const targetPull = windStrength * chargeLevel * 14;
+      aimWindPush += (targetPull - aimWindPush) * 0.12;
+      aimX = Math.max(50, Math.min(W-50, aimX + aimWindPush * 0.08));
+    } else {
+      aimWindPush *= 0.85; // decay when not charging
+    }
   }
 }
 
@@ -3160,65 +3318,130 @@ function drawCommentator(){
 
 function drawWindFlag(){
   if(state !== 'aiming' && state !== 'kicking') return;
+  if(Math.abs(windStrength) < 0.05) return; // no widget for calm
 
-  const fx = 18, fy = 52;   // top-left corner position
-  const poleH = 28;
+  const dir   = windStrength >= 0 ? 1 : -1;
+  const speed = Math.abs(windStrength);
+  const windColour = windStrength > 0.4 ? '#ff6644'
+                   : windStrength < -0.4 ? '#6699ff'
+                   : '#ffdd44';
 
-  // Box background
-  ctx.fillStyle = 'rgba(0,0,0,0.60)';
-  ctx.fillRect(fx-4, fy-4, 66, 44);
-  ctx.strokeStyle = 'rgba(0,200,255,0.4)';
+  // ── Flowing wind streaks across the pitch ─────────────────
+  // Only show during aiming so they don't distract during kick
+  if(state === 'aiming'){
+    ctx.save();
+    // Clip to pitch area (below crowd, above feet)
+    ctx.beginPath();
+    ctx.rect(0, H*0.40, W, H*0.52);
+    ctx.clip();
+
+    const streamCount = Math.floor(4 + speed * 6);
+    for(let i = 0; i < streamCount; i++){
+      // Each stream has a fixed seed row + animated X offset
+      const seedY    = H*0.42 + (i / streamCount) * H*0.46;
+      const phase    = (i * 137.5) % (Math.PI * 2); // golden angle spread
+      const offset   = ((windAngle * speed * 3 + phase * W * 0.12) % W);
+      const startX   = dir > 0
+        ? (-60 + offset) % W
+        : W - ((-60 + offset) % W);
+      const length   = 18 + speed * 35;
+      const alpha    = 0.08 + speed * 0.14;
+      const waveAmp  = 3 + Math.sin(phase) * 2;
+
+      ctx.strokeStyle = windColour;
+      ctx.lineWidth   = 1 + speed * 0.8;
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash([length*0.6, length*1.4]);
+      ctx.lineDashOffset = 0;
+
+      ctx.beginPath();
+      // Wavy horizontal streak
+      const steps = 8;
+      for(let s = 0; s <= steps; s++){
+        const t3 = s / steps;
+        const sx3 = startX + dir * t3 * length;
+        const sy3 = seedY  + Math.sin(windAngle * 1.8 + t3 * Math.PI * 2 + phase) * waveAmp;
+        if(s === 0) ctx.moveTo(sx3, sy3);
+        else ctx.lineTo(sx3, sy3);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // ── Corner widget ─────────────────────────────────────────
+  const fx = 18, fy = 52;
+
+  // Background box
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(fx-4, fy-4, 72, 52);
+  ctx.strokeStyle = `rgba(${windStrength>0?'255,100,68':'100,150,255'},0.5)`;
   ctx.lineWidth = 1;
-  ctx.strokeRect(fx-4, fy-4, 66, 44);
+  ctx.strokeRect(fx-4, fy-4, 72, 52);
 
-  // Label
-  ctx.fillStyle = '#0cf';
+  // WIND label
+  ctx.fillStyle = windColour;
   ctx.font = '5px "Press Start 2P"';
   ctx.textAlign = 'left';
-  ctx.fillText('WIND', fx, fy+4);
+  ctx.fillText('WIND', fx, fy+5);
 
-  // Flagpole
-  ctx.strokeStyle = '#aaa';
+  // Animated flowing dots (particle trail style)
+  const dotCount = 5;
+  for(let d = 0; d < dotCount; d++){
+    const t3    = ((windAngle * speed * 2 + d * (1/dotCount)) % 1 + 1) % 1;
+    const dotX  = fx + 6 + (dir > 0 ? t3 * 52 : 52 - t3 * 52);
+    const dotY  = fy + 22 + Math.sin(windAngle*3 + d * 1.2) * 5;
+    const dotA  = 0.3 + t3 * 0.7;
+    const dotR  = 2 + t3 * 2;
+    ctx.globalAlpha = dotA;
+    ctx.fillStyle   = windColour;
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, dotR, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Animated flag waving on pole
+  const poleX = dir > 0 ? fx+8 : fx+60;
+  ctx.strokeStyle = '#888';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(fx+6, fy+8);
-  ctx.lineTo(fx+6, fy+8+poleH);
+  ctx.moveTo(poleX, fy+10);
+  ctx.lineTo(poleX, fy+36);
   ctx.stroke();
 
-  // Animated flag — sine wave cloth
+  // Flag cloth — sine wave segments
   const segCount = 6;
-  const flagW    = 22;
-  const flagH    = 8;
-  const flagY    = fy+10;
-  const dir      = windStrength >= 0 ? 1 : -1;
-  const speed    = Math.abs(windStrength);
-
+  const flagW    = 20;
+  const flagY    = fy+13;
   ctx.beginPath();
-  ctx.moveTo(fx+6, flagY);
-  for(let s=0; s<=segCount; s++){
-    const t2  = s / segCount;
-    const wx  = fx+6 + dir * t2 * flagW;
-    const wy  = flagY + Math.sin(windAngle*2 + t2*Math.PI*1.5) * flagH*0.5*speed*t2;
+  for(let s = 0; s <= segCount; s++){
+    const t3 = s / segCount;
+    const wx = poleX + dir * t3 * flagW;
+    const wy = flagY + Math.sin(windAngle*2.5 + t3*Math.PI*2) * 4 * speed * t3;
     if(s===0) ctx.moveTo(wx, wy);
     else ctx.lineTo(wx, wy);
   }
-  // Fill flag shape
-  const windColour = windStrength > 0.4 ? '#ff4444'
-                   : windStrength < -0.4 ? '#4488ff'
-                   : '#ffdd00';
   ctx.strokeStyle = windColour;
   ctx.lineWidth   = 5;
   ctx.lineCap     = 'round';
   ctx.stroke();
   ctx.lineCap = 'butt';
 
-  // Strength text
-  const strLabel = Math.abs(windStrength) < 0.15 ? 'CALM'
-                 : Math.abs(windStrength) < 0.45 ? (dir>0?'>>':' <<')
-                 : (dir>0?'>>>':'<<<');
+  // Directional arrows
+  const arrowY = fy + 44;
+  const strength = Math.abs(windStrength);
+  const arrows   = strength > 0.6 ? 3 : strength > 0.3 ? 2 : 1;
+  ctx.font      = '7px "Press Start 2P"';
+  ctx.textAlign = 'center';
   ctx.fillStyle = windColour;
-  ctx.font      = '5px "Press Start 2P"';
-  ctx.fillText(strLabel, fx+32, flagY+8);
+  ctx.globalAlpha = 0.9;
+  const arrow   = dir > 0 ? '>' : '<';
+  let arrowStr  = arrow.repeat(arrows);
+  ctx.fillText(arrowStr, fx+32, arrowY);
+  ctx.globalAlpha = 1;
 }
 
 function drawCpuIntro(){
@@ -3269,6 +3492,7 @@ function render(){
   drawAimReticle();
   drawPowerBar();
   drawWindFlag();
+  drawGKPersonalityBadge();
   drawArrows();
   drawParticles();
   drawPixelGoalLine();
